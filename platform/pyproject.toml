@@ -36,8 +36,9 @@ dependencies = [
     "pytest-json-report>=1.5", # JSON 测试报告
     "playwright>=1.47",        # UI 自动化
 
-    # 数据库断言
-    "asyncpg>=0.29",           # PostgreSQL 异步驱动
+    # 数据库
+    "psycopg[binary]>=3.1",    # Django PostgreSQL 后端驱动
+    "asyncpg>=0.29",           # PostgreSQL 异步驱动（数据断言）
 
     # 工具
     "python-jsonpath>=0.11",   # JSONPath 断言

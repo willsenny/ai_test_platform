@@ -1,61 +1,42 @@
 # OpenCode 配置 - AI 测试管理平台
-# 模型策略：DeepSeek 为主 (Flash + Pro)，Claude Sonnet 兜底
+# 模型策略：Flash-Only (DeepSeek V4.1 Flash)，reasoning 档位区分 low / high
 
 model:
   # 默认模型 (日常补全/批量生成)
-  default: deepseek/deepseek-chat  # Flash
+  default: deepseek/deepseek-flash
 
   # 模型列表
   models:
-    - id: deepseek/deepseek-chat
-      name: DeepSeek V4 Flash
+    - id: deepseek/deepseek-flash
+      name: DeepSeek V4.1 Flash
       provider: deepseek
       base_url: ${DEEPSEEK_BASE_URL}
       api_key: ${DEEPSEEK_API_KEY}
-      tier: l1
-      # 定价 (每百万 token)
+      # reasoning_effort: low (快速生成) / high (深度思考)
       pricing:
         input: 0.14
         output: 0.28
         cached: 0.0028
 
-    - id: deepseek/deepseek-reasoner
-      name: DeepSeek V4 Pro
-      provider: deepseek
-      base_url: ${DEEPSEEK_BASE_URL}
-      api_key: ${DEEPSEEK_API_KEY}
-      tier: l2
-      pricing:
-        input: 0.435
-        output: 2.5
-
-    - id: anthropic/claude-sonnet-4-6
-      name: Claude Sonnet 4.6
-      provider: anthropic
-      base_url: ${ANTHROPIC_BASE_URL}
-      api_key: ${ANTHROPIC_API_KEY}
-      tier: l3
-      pricing:
-        input: 3.0
-        output: 15.0
-      # 仅在自愈/疑难根因时使用
+    - id: ollama/qwen2.5-coder:14b
+      name: Local Ollama (离线兜底)
+      provider: ollama
+      base_url: ${OLLAMA_BASE_URL}
+      api_key: ollama
 
 # 模型路由规则（与 platform/apps/agent/router.py 对齐）
 router:
-  # 默认走 Flash
-  default: l1
+  # 默认走 Flash low
+  default: flash-low
 
-  # 任务类型 → 层级
+  # 任务类型 → reasoning 档位
   rules:
-    # L1: 批量确定性 (70%)
-    - pattern: "generate_*|refine_*|summarize_*|classify_*|draft_*"
-      tier: l1
-    # L2: 复杂编排 (25%)
-    - pattern: "refactor_*|design_*|review_*|analyze_*"
-      tier: l2
-    # L3: 疑难 (5%)
-    - pattern: "root_cause*|self_heal*|complex_debug*"
-      tier: l3
+    # low: 快速生成/确定性任务 (~90%)
+    - pattern: "generate_*|refine_*|summarize_*|classify_*|draft_*|rag_*"
+      reasoning: low
+    # high: 深度思考类 (~10%)
+    - pattern: "refactor_*|design_*|review_*|analyze_*|root_cause*|self_heal*|complex_debug*"
+      reasoning: high
 
 # MCP 配置（复用 platform/apps/mcp/config.json）
 mcp:
@@ -88,7 +69,7 @@ skills:
       ))
       print(result)
       "
-    model: l1  # 默认 Flash
+    reasoning: low  # 快速生成
 
   - name: self-heal
     description: |
@@ -112,7 +93,7 @@ skills:
       )
       print(result, pr)
       "
-    model: l3  # 自愈用 Sonnet 兜底（但规则/向量阶段仍走 Flash）
+    reasoning: high  # 自愈根因需深度思考（规则/向量阶段走 low）
 
   - name: api-tester
     description: |
@@ -128,7 +109,7 @@ skills:
       result = await call_tool('api', 'load_openapi', {'spec_url': '{openapi_url}'})
       print(result)
       "
-    model: l2  # Pro 处理多文件
+    reasoning: low  # 接口用例生成
 
   - name: rag-ingest
     description: |

@@ -5,10 +5,13 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from pathlib import Path
 from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
 
 plt.rcParams["font.family"] = "WenQuanYi Micro Hei"
 plt.rcParams["axes.unicode_minus"] = False
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def draw_architecture():
@@ -66,12 +69,12 @@ def draw_architecture():
 
     nodes = [
         (1, 6.5, "①检索\nRAG", 7),
-        (3, 6.5, "②理解\nL2 Pro", 7),
-        (5, 6.5, "③场景\nL1 Flash", 7),
-        (7, 6.5, "④步骤\nL1 Flash", 7),
-        (1, 5.8, "⑤断言\nL1 Flash", 7),
-        (3, 5.8, "⑥API代码\nL2 Pro", 7),
-        (5, 5.8, "⑦UI代码\nL2 Pro", 7),
+        (3, 6.5, "②理解\nFlash high", 7),
+        (5, 6.5, "③场景\nFlash low", 7),
+        (7, 6.5, "④步骤\nFlash low", 7),
+        (1, 5.8, "⑤断言\nFlash low", 7),
+        (3, 5.8, "⑥API代码\nFlash low", 7),
+        (5, 5.8, "⑦UI代码\nFlash low", 7),
         (7, 5.8, "⑧执行\nMCP", 7),
     ]
     for x, y, text, fs in nodes:
@@ -113,12 +116,12 @@ def draw_architecture():
         arrow(x, 3, x, 1.8)
 
     # 模型标注
-    ax.text(14.5, 11.5, "模型路由:\nL1 Flash (70%)\nL2 Pro (25%)\nL3 Sonnet (5%)",
+    ax.text(14.5, 11.5, "模型策略: Flash-Only\nreasoning low (~90%)\nreasoning high (~10%)",
             fontsize=8, ha="right", color="#333",
             bbox=dict(boxstyle="round", facecolor="#FFF9C4", alpha=0.8))
 
     plt.tight_layout()
-    plt.savefig("/data/workspace/ai_test_platform/architecture.png", dpi=150, bbox_inches="tight")
+    plt.savefig(ROOT / "architecture.png", dpi=150, bbox_inches="tight")
     plt.close()
     print("✅ architecture.png")
 
@@ -129,8 +132,8 @@ def draw_cost_comparison():
 
     # --- 左图: 各方案单次生成成本 ---
     ax = axes[0]
-    models = ["纯 Sonnet\n4.6", "混合\nL2+L3", "推荐路由\nL1+L2+L3", "纯 Flash\n/Pro"]
-    costs = [50, 18, 8, 3]
+    models = ["纯 Sonnet\n4.6", "混合路由\nPro+Sonnet", "旧三层路由\nFlash+Pro", "Flash-Only\n本方案"]
+    costs = [50, 18, 8, 2]
     colors = ["#E74C3C", "#F39C12", "#27AE60", "#3498DB"]
 
     bars = ax.bar(models, costs, color=colors, width=0.6)
@@ -143,15 +146,15 @@ def draw_cost_comparison():
                 f"${cost}", ha="center", fontsize=11, fontweight="bold")
 
     # 省钱标注
-    ax.annotate("省 84%", xy=(2, 8), xytext=(2, 35),
+    ax.annotate("省 96%", xy=(3, 2), xytext=(2, 35),
                 fontsize=11, color="#27AE60", fontweight="bold",
                 arrowprops=dict(arrowstyle="->", color="#27AE60"))
 
-    # --- 右图: 模型调用占比 ---
+    # --- 右图: reasoning 档位占比 ---
     ax2 = axes[1]
-    tiers = ["L1 Flash\n(批量生成)", "L2 Pro\n(复杂编排)", "L3 Sonnet\n(自愈/评审)"]
-    shares = [70, 25, 5]
-    colors_pie = ["#3498DB", "#F39C12", "#E74C3C"]
+    tiers = ["Flash low\n(快速生成)", "Flash high\n(深度思考)"]
+    shares = [90, 10]
+    colors_pie = ["#3498DB", "#E74C3C"]
 
     wedges, texts, autotexts = ax2.pie(
         shares, labels=tiers, colors=colors_pie, autopct="%1.0f%%",
@@ -160,10 +163,10 @@ def draw_cost_comparison():
     for t in autotexts:
         t.set_fontsize(12)
         t.set_fontweight("bold")
-    ax2.set_title("模型调用占比\n(决定成本的关键)", fontsize=11, fontweight="bold")
+    ax2.set_title("reasoning 档位占比\n(决定成本的关键)", fontsize=11, fontweight="bold")
 
     plt.tight_layout()
-    plt.savefig("/data/workspace/ai_test_platform/cost_comparison.png", dpi=150, bbox_inches="tight")
+    plt.savefig(ROOT / "cost_comparison.png", dpi=150, bbox_inches="tight")
     plt.close()
     print("✅ cost_comparison.png")
 
@@ -177,9 +180,9 @@ def draw_self_heal_flow():
     ax.set_title("自愈引擎 - 五段闭环 (Self-Heal Engine)", fontsize=13, fontweight="bold", pad=15)
 
     steps = [
-        ("① 规则修复", "L1 Flash\n超时/可见性/网络", "#3498DB"),
-        ("② 向量定位器", "L1 Flash\n历史相似定位器", "#2ECC71"),
-        ("③ LLM 候选", "L3 Sonnet\n分析截图+日志", "#E74C3C"),
+        ("① 规则修复", "Flash low\n超时/可见性/网络", "#3498DB"),
+        ("② 向量定位器", "Flash low\n历史相似定位器", "#2ECC71"),
+        ("③ LLM 候选", "Flash high\n分析截图+日志", "#E74C3C"),
         ("④ 重跑验证", "MCP\nPlaywright 执行", "#F39C12"),
         ("⑤ 开 PR", "Git MCP\n自动提交修复", "#9B59B6"),
     ]
@@ -209,12 +212,12 @@ def draw_self_heal_flow():
     ax.text(7, 0.5, "失败 → 回到 Step ① (受 retry_budget 限制，默认 3 次)", ha="center", fontsize=9, color="#E74C3C")
 
     # 成本标注
-    ax.text(7, 4.3, "成本: 仅 Step ③ 用 Sonnet ($0.0028/M cached)，其余走 Flash → 单次自愈 ≈ $0.003–$0.05",
+    ax.text(7, 4.3, "成本: 仅 Step ③ 用 reasoning=high，其余走 low → 单次自愈 ≈ $0.002–$0.02",
             ha="center", fontsize=9, color="#333",
             bbox=dict(boxstyle="round", facecolor="#FFF9C4", alpha=0.8))
 
     plt.tight_layout()
-    plt.savefig("/data/workspace/ai_test_platform/self_heal_flow.png", dpi=150, bbox_inches="tight")
+    plt.savefig(ROOT / "self_heal_flow.png", dpi=150, bbox_inches="tight")
     plt.close()
     print("✅ self_heal_flow.png")
 

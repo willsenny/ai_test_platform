@@ -16,14 +16,14 @@ uv sync   # 或 pip install -e .
 ## 3. 配置环境变量
 
 ```bash
-cp .env.example .env
+cp ../.env.example .env
 # 编辑 .env，填入 DEEPSEEK_API_KEY
 ```
 
 ## 4. 初始化
 
 ```bash
-python scripts/init_qdrant.py
+python ../scripts/init_qdrant.py
 ```
 
 输出:
@@ -41,9 +41,10 @@ python scripts/init_qdrant.py
 🎉 已导入 3 份示例文档
 
 3. 验证模型路由...
-  ✅ generate_testcase         → l1_flash    (deepseek-chat)
-  ✅ refactor_code             → l2_pro      (deepseek-reasoner)
-  ✅ self_heal_repair          → l3_sonnet   (claude-sonnet-4-6)
+  ✅ generate_testcase         → low    (deepseek-flash)
+  ✅ generate_steps            → low    (deepseek-flash)
+  ✅ refactor_code             → high   (deepseek-flash)
+  ✅ self_heal_repair          → high   (deepseek-flash)
 
 ✅ 初始化完成！
 ```
@@ -51,6 +52,7 @@ python scripts/init_qdrant.py
 ## 5. 启动平台
 
 ```bash
+python manage.py migrate   # 初始化数据库（Project / TestCase 表）
 python manage.py runserver
 # API 文档: http://localhost:8000/api/docs/
 ```
@@ -117,18 +119,18 @@ pytest tests/ -v
 
 ---
 
-## 模型成本速查
+## 模型成本速查（Flash-Only）
 
-| 层级 | 模型 | 价格 (每 M tokens) | 占比 |
+| 档位 | 模型 | 价格 (每 M tokens) | 占比 |
 |---|---|---|---|
-| L1 | DeepSeek V4 Flash | $0.14 / $0.28 (cached $0.0028) | 70% |
-| L2 | DeepSeek V4 Pro | $0.435 / $2.5 | 25% |
-| L3 | Claude Sonnet 4.6 | $3 / $15 | 5% |
+| low | DeepSeek V4.1 Flash | $0.14 / $0.28 (cached $0.0028) | ~90% |
+| high | DeepSeek V4.1 Flash (reasoning) | 同上（按 Flash 计费） | ~10% |
+| 兜底 | 本地 Ollama | 免费（自建算力） | 极少 |
 
 **中型冲刺 (100 需求 × 8 用例) 成本:**
 - 纯 Sonnet: ~$50
-- 推荐路由: **~$5–12** ← 你在这里
-- 纯 Flash/Pro: ~$2–5
+- 旧三层路由: ~$8
+- **Flash-Only: ~$2** ← 你在这里
 
 ---
 
@@ -143,7 +145,7 @@ ai_test_platform/
 ├── docker-compose.yml
 │
 ├── opencode/              # OpenCode 配置 + Skills
-│   ├── config.yaml        # 模型路由 (Flash/Pro/Sonnet)
+│   ├── config.yaml        # 模型路由 (Flash-Only, reasoning low/high)
 │   └── skills/
 │       ├── test-generator/
 │       └── self-heal/

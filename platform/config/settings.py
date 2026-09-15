@@ -102,10 +102,13 @@ CORS_ALLOW_ALL_ORIGINS = DEBUG
 # Agent 配置
 # ============================================================
 AGENT_CONFIG = {
-    "model_tiers": {
-        "l1": os.getenv("MODEL_L1", "deepseek-chat"),
-        "l2": os.getenv("MODEL_L2", "deepseek-reasoner"),
-        "l3": os.getenv("MODEL_L3", "claude-sonnet-4-6"),
+    # Flash-Only：唯一模型，通过 reasoning 档位区分思考深度
+    "model": os.getenv("DEEPSEEK_MODEL", "deepseek-flash"),
+    "reasoning_levels": ["low", "high"],
+    # 离线兜底（可选）
+    "local_fallback": {
+        "model": os.getenv("OLLAMA_MODEL", "qwen2.5-coder:14b"),
+        "base_url": os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1"),
     },
     "retry_budget": int(os.getenv("RETRY_BUDGET", "3")),
     "daily_budget_usd": float(os.getenv("DAILY_BUDGET", "10.0")),

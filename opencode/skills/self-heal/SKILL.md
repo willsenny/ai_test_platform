@@ -16,17 +16,17 @@ triggers:
 ## 五段闭环
 
 ```
-1. 规则修复 (L1 Flash)
+1. 规则修复 (Flash low)
    - TimeoutError → wait_for_visible
    - ElementNotVisible → scrollIntoView
    - NetworkError → 幂等重试
    - StaleElement → 重新查询
 
-2. 向量定位器库 (L1 Flash)
+2. 向量定位器库 (Flash low)
    - 从 Qdrant 检索历史成功定位器
    - 相同 URL + 相似元素描述 → 推荐
 
-3. LLM 候选 (L3 Sonnet)
+3. LLM 候选 (Flash high)
    - 输入: 失败日志 + 截图 + accessibility tree
    - 输出: 候选定位器 + 置信度
 
@@ -44,7 +44,7 @@ triggers:
 ## 成本保护
 
 - `retry_budget` 默认 3，超过立即放弃
-- 仅 Step 3 使用 L3 (Sonnet)，其余走 Flash
+- 仅 Step 3 使用 reasoning=high，其余走 low
 - 单次自愈成本约 $0.003–$0.05
 
 ## 输入

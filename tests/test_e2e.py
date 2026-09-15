@@ -24,13 +24,13 @@ class TestFullWorkflow:
     """完整工作流测试（Mock LLM 调用）"""
 
     @pytest.mark.asyncio
-    @patch("apps.agent.nodes.call_llm")
-    async def test_requirement_to_testcases(self, mock_llm):
+    @patch("apps.rag.service.retrieve", new_callable=AsyncMock)
+    async def test_requirement_to_testcases(self, mock_retrieve, monkeypatch):
         """需求 → 生成测试用例 → 代码"""
-        from apps.agent.graph import run_test_workflow
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        mock_retrieve.return_value = []
 
-        # Mock LLM 响应
-        mock_llm.return_value = {"content": "[]"}
+        from apps.agent.graph import run_test_workflow
 
         result = await run_test_workflow(
             requirement="用户登录：手机号+验证码",
@@ -43,8 +43,9 @@ class TestFullWorkflow:
 
     @pytest.mark.asyncio
     @patch("apps.mcp.client.MCPClient.call_tool")
-    async def test_self_heal_flow(self, mock_call_tool):
+    async def test_self_heal_flow(self, mock_call_tool, monkeypatch):
         """自愈五段闭环"""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
         from apps.selfheal.engine import SelfHealEngine, FailureContext
 
         # Mock: 第一次规则修复失败，第二次向量成功
@@ -54,6 +55,7 @@ class TestFullWorkflow:
         failure = FailureContext(
             test_id="login_001",
             error_message="TimeoutError: waiting for #submit",
+            stack_trace="",
             locator="#submit-btn",
             page_url="https://example.com/login",
         )
@@ -66,16 +68,20 @@ class TestFullWorkflow:
         assert hasattr(result, "retries")
 
     @pytest.mark.asyncio
-    async def test_cost_tracker(self):
-        """成本追踪"""
-        from apps.agent.router import get_cost_tracker, route, ModelTier
+    async def test_cost_tracker(self, monkeypatch):
+        """成本追踪（Flash-Only）"""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        from apps.agent.router import get_cost_tracker, route
 
         tracker = get_cost_tracker()
-        cfg = route("generate_testcase")  # L1
+        route("generate_testcase")  # Flash (low)
 
-        tracker.record(cfg.tier, 1000, 500)
+        calls_before = tracker.calls
+        tokens_before = tracker.input_tokens
+        tracker.record(1000, 500)
 
-        assert tracker.usage[ModelTier.L1_FLASH]["calls"] == 1
+        assert tracker.calls == calls_before + 1
+        assert tracker.input_tokens == tokens_before + 1000
         assert tracker.total_usd() > 0
 
 
@@ -94,39 +100,61 @@ class TestRAG:
         assert all(len(c) <= 500 for c in chunks)
 
     @pytest.mark.asyncio
+    @patch("apps.rag.service._get_qdrant")
+    @patch("apps.rag.service.ensure_collection", new_callable=AsyncMock)
     @patch("apps.rag.service.embed")
-    async def test_retrieve_empty(self, mock_embed):
+    async def test_retrieve_empty(self, mock_embed, mock_ensure, mock_qdrant):
         """空库检索返回空"""
         from apps.rag.service import retrieve
 
         mock_embed.return_value = [[0.0] * 1024]
+        mock_client = AsyncMock()
+        mock_client.search.return_value = []
+        mock_qdrant.return_value = mock_client
 
         results = await retrieve("test query")
         assert results == []
 
 
 class TestModelRouter:
-    """模型路由测试"""
+    """模型路由测试（Flash-Only + reasoning 档位）"""
 
-    def test_default_is_flash(self):
-        from apps.agent.router import route, ModelTier
+    def test_default_is_flash_low(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        from apps.agent.router import route
         cfg = route("generate_testcase")
-        assert cfg.tier == ModelTier.L1_FLASH
+        assert cfg.model == "deepseek-flash"
+        assert cfg.reasoning_effort is None
 
-    def test_complex_uses_pro(self):
-        from apps.agent.router import route, ModelTier
+    def test_complex_uses_high_reasoning(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        from apps.agent.router import route
         cfg = route("refactor_code")
-        assert cfg.tier == ModelTier.L2_PRO
+        assert cfg.model == "deepseek-flash"
+        assert cfg.reasoning_effort == "high"
 
-    def test_self_heal_uses_sonnet(self):
-        from apps.agent.router import route, ModelTier
+    def test_self_heal_uses_high_reasoning(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        from apps.agent.router import route
         cfg = route("self_heal_repair")
-        assert cfg.tier == ModelTier.L3_SONNET
+        assert cfg.reasoning_effort == "high"
 
-    def test_force_tier(self):
-        from apps.agent.router import route, ModelTier
-        cfg = route("anything", force_tier=ModelTier.L3_SONNET)
-        assert cfg.tier == ModelTier.L3_SONNET
+    def test_force_reasoning(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        from apps.agent.router import route, ReasoningLevel
+        cfg = route("anything", force_reasoning=ReasoningLevel.HIGH)
+        assert cfg.reasoning_effort == "high"
+
+    def test_local_fallback(self):
+        from apps.agent.router import route
+        cfg = route("anything", use_local=True)
+        assert cfg.source == "local-ollama"
+
+    def test_missing_api_key_raises(self, monkeypatch):
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+        from apps.agent.router import get_config, ReasoningLevel
+        with pytest.raises(RuntimeError):
+            get_config(ReasoningLevel.LOW)
 
 
 class TestMCPClient:

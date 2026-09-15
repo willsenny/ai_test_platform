@@ -39,8 +39,9 @@ triggers:
 
 ## 模型
 
-- 默认: L1 Flash (DeepSeek V4 Flash)
-- 复杂编排: L2 Pro (DeepSeek V4 Pro)
+- 唯一模型: DeepSeek V4.1 Flash (Flash-Only)
+- 快速生成: reasoning=low（用例/步骤/断言）
+- 深度思考: reasoning=high（需求理解/复杂编排）
 
 ## 示例
 

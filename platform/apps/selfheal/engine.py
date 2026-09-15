@@ -1,11 +1,11 @@
 """
 自愈引擎：五段闭环
 
-1. 规则修复 (L1 Flash)  - 超时重试、等待条件、网络抖动
-2. 向量定位器库 (L1)    - 从历史成功定位器中找相似
-3. LLM 候选 (L3 Sonnet)  - 分析失败截图/日志生成修复
-4. 重跑验证 (MCP)        - 执行修复后代码
-5. 开 PR (Git MCP)        - 自动提交修复
+1. 规则修复 (Flash low)   - 超时重试、等待条件、网络抖动
+2. 向量定位器库 (Flash low) - 从历史成功定位器中找相似
+3. LLM 候选 (Flash high)  - 分析失败截图/日志生成修复
+4. 重跑验证 (MCP)          - 执行修复后代码
+5. 开 PR (Git MCP)         - 自动提交修复
 
 这是 WHartTest 唯一没做好的部分 → 你的核心差异化。
 """
@@ -13,8 +13,8 @@ import asyncio
 import json
 from dataclasses import dataclass, field
 from typing import Optional
-from .router import route, ModelTier, get_cost_tracker
-from .mcp.client import MCPClient
+from apps.agent.router import route, get_cost_tracker
+from apps.mcp.client import MCPClient
 
 
 @dataclass
@@ -63,21 +63,21 @@ class SelfHealEngine:
         成本保护：超过 retry_budget 立即放弃，防止无限循环
         """
         for attempt in range(self.retry_budget):
-            # ---- Step 1: 规则修复 (L1 Flash, 最快最便宜) ----
+            # ---- Step 1: 规则修复 (Flash low, 最快最便宜) ----
             result = await self._rule_based_fix(failure)
             if result and result.success:
                 result.strategy = "rule"
                 result.retries = attempt + 1
                 return result
 
-            # ---- Step 2: 向量定位器库 (L1 Flash) ----
+            # ---- Step 2: 向量定位器库 (Flash low) ----
             result = await self._vector_locator_lookup(failure)
             if result and result.success:
                 result.strategy = "vector"
                 result.retries = attempt + 1
                 return result
 
-            # ---- Step 3: LLM 候选生成 (L3 Sonnet, 仅此步用强模型) ----
+            # ---- Step 3: LLM 候选生成 (Flash high, 深度思考) ----
             result = await self._llm_candidate(failure)
             if not result:
                 continue
@@ -151,7 +151,7 @@ LOCATORS = {{
 
     async def _rule_based_fix(self, failure: FailureContext) -> Optional[HealResult]:
         """
-        Step 1: 规则修复 (L1 Flash)
+        Step 1: 规则修复 (Flash low)
 
         常见模式：
         - TimeoutError → 增加等待时间
@@ -159,9 +159,9 @@ LOCATORS = {{
         - NetworkError → 重试 (幂等)
         - StaleElementReference → 重新查询
         """
-        cfg = route("refine_locator")  # L1 Flash
+        cfg = route("refine_locator")  # Flash (low)
         # 记录成本
-        self.cost_tracker.record(cfg.tier, 100, 50)
+        self.cost_tracker.record(100, 50)
 
         error = failure.error_message.lower()
 
@@ -199,14 +199,14 @@ LOCATORS = {{
 
     async def _vector_locator_lookup(self, failure: FailureContext) -> Optional[HealResult]:
         """
-        Step 2: 向量定位器库 (L1 Flash)
+        Step 2: 向量定位器库 (Flash low)
 
         从 Qdrant 检索历史成功的定位器：
         - 相同页面 URL + 相似元素描述 → 推荐定位器
         - 基于 text/role/position 的语义相似度
         """
-        cfg = route("refine_locator")  # L1 Flash
-        self.cost_tracker.record(cfg.tier, 200, 100)
+        cfg = route("refine_locator")  # Flash (low)
+        self.cost_tracker.record(200, 100)
 
         # 从 Qdrant 检索相似定位器
         # 实际实现:
@@ -232,15 +232,15 @@ LOCATORS = {{
 
     async def _llm_candidate(self, failure: FailureContext) -> Optional[HealResult]:
         """
-        Step 3: LLM 候选生成 (L3 Sonnet - 仅此步用强模型)
+        Step 3: LLM 候选生成 (Flash high - 深度思考)
 
         输入：失败日志 + 截图 + 页面 accessibility tree
         输出：候选定位器 + 置信度
 
-        这是唯一使用 L3 (强模型) 的步骤。
+        这是唯一需要深度思考 (reasoning=high) 的步骤。
         """
-        cfg = route("self_heal_repair")  # L3 Sonnet
-        self.cost_tracker.record(cfg.tier, 2000, 1000)  # 上下文较大
+        cfg = route("self_heal_repair")  # Flash (high)
+        self.cost_tracker.record(2000, 1000)  # 上下文较大
 
         # 实际调用:
         # prompt = self._build_heal_prompt(failure)

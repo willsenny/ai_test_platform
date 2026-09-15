@@ -7,7 +7,7 @@ LangGraph 各节点实现
   → execute → [heal loop] → finalize
 """
 import json
-from .router import route, ModelTier, get_cost_tracker
+from .router import route
 from .state import AgentState, TestCase
 
 
@@ -27,11 +27,11 @@ async def retrieve_node(state: AgentState) -> dict:
 
 
 # ============================================================
-# Phase 2: 需求理解（L2 Pro - 需要推理）
+# Phase 2: 需求理解（Flash high - 需要推理）
 # ============================================================
 async def understand_node(state: AgentState) -> dict:
     """理解需求，提取实体、规则、边界条件"""
-    cfg = route("design_workflow")  # → L2 Pro
+    cfg = route("design_workflow")  # → Flash (high)
     # 实际调用: await litellm.acompletion(model=cfg.model, ...)
     prompt = f"""
 基于以下需求和相关知识，提取：
@@ -49,43 +49,43 @@ async def understand_node(state: AgentState) -> dict:
 
 
 # ============================================================
-# Phase 3: 场景设计（L1 Flash - 批量）
+# Phase 3: 场景设计（Flash low - 批量）
 # ============================================================
 async def design_scenarios_node(state: AgentState) -> dict:
     """设计测试场景（等价类、边界值、异常流）"""
-    cfg = route("generate_testcase")  # → L1 Flash
+    cfg = route("generate_testcase")  # → Flash (low)
     # response = await call_llm(cfg, ...)
     scenarios = []  # TODO: 从 LLM 响应解析
     return {"scenarios": scenarios}
 
 
 # ============================================================
-# Phase 4: 步骤生成（L1 Flash）
+# Phase 4: 步骤生成（Flash low）
 # ============================================================
 async def generate_steps_node(state: AgentState) -> dict:
     """为每个场景生成具体操作步骤"""
-    cfg = route("generate_steps")  # → L1 Flash
+    cfg = route("generate_steps")  # → Flash (low)
     test_cases: list[TestCase] = []
     # response = await call_llm(cfg, structured_output=TestCase schema)
     return {"test_cases": test_cases}
 
 
 # ============================================================
-# Phase 5: 断言设计（L1 Flash）
+# Phase 5: 断言设计（Flash low）
 # ============================================================
 async def generate_assertions_node(state: AgentState) -> dict:
     """为每步生成断言（状态码、字段校验、数据库一致性）"""
-    cfg = route("generate_assertion")  # → L1 Flash
+    cfg = route("generate_assertion")  # → Flash (low)
     # response = await call_llm(cfg, ...)
     return {"test_cases": state.get("test_cases", [])}
 
 
 # ============================================================
-# Phase 6: API 自动化代码（L2 Pro - 多文件）
+# Phase 6: API 自动化代码（Flash high - 多文件）
 # ============================================================
 async def generate_api_code_node(state: AgentState) -> dict:
     """生成 pytest + httpx 接口测试代码"""
-    cfg = route("generate_api_tests")  # → L2 Pro
+    cfg = route("generate_api_tests")  # → Flash (low)
     template = '''
 import pytest
 import httpx
@@ -107,11 +107,11 @@ async def test_{func_name}(client: httpx.AsyncClient):
 
 
 # ============================================================
-# Phase 7: UI 自动化代码（L2 Pro）
+# Phase 7: UI 自动化代码（Flash low）
 # ============================================================
 async def generate_ui_code_node(state: AgentState) -> dict:
     """生成 Playwright 测试代码（基于 accessibility snapshot）"""
-    cfg = route("generate_api_tests")  # → L2 Pro
+    cfg = route("generate_ui_tests")  # → Flash (low)
     template = '''
 import pytest
 from playwright.async_api import Page
@@ -140,14 +140,14 @@ async def execute_node(state: AgentState) -> dict:
 
 
 # ============================================================
-# Phase 9: 自愈检查（L3 Sonnet - 仅在失败时）
+# Phase 9: 自愈检查（Flash high - 仅在失败时）
 # ============================================================
 async def self_heal_node(state: AgentState) -> dict:
     """
     自愈五段闭环：
-    1. 规则修复 (L1) - 超时重试、等待条件
-    2. 向量定位器库 (L1) - 相似元素匹配
-    3. LLM 候选生成 (L3) - 分析失败截图/日志
+    1. 规则修复 (low) - 超时重试、等待条件
+    2. 向量定位器库 (low) - 相似元素匹配
+    3. LLM 候选生成 (high) - 分析失败截图/日志
     4. 重跑验证 (MCP) - 执行修复后代码
     5. 开 PR (Git MCP) - 自动提交修复
     """
@@ -159,19 +159,19 @@ async def self_heal_node(state: AgentState) -> dict:
 
     healed = []
     for failure in failures:
-        # Step 1: 规则修复 (L1 Flash)
+        # Step 1: 规则修复 (Flash low)
         rule_fix = await _try_rule_based_fix(failure)
         if rule_fix:
             healed.append(rule_fix)
             continue
 
-        # Step 2: 向量定位器库 (L1 Flash)
+        # Step 2: 向量定位器库 (Flash low)
         locator = await _find_similar_locator(failure)
         if locator:
             healed.append(locator)
             continue
 
-        # Step 3: LLM 候选 (L3 Sonnet - 仅此步用强模型)
+        # Step 3: LLM 候选 (Flash high - 深度思考)
         cfg = route("self_heal_repair")
         # response = await call_llm(cfg, failure_log + screenshot)
         candidate = {"old": failure.get("locator"), "new": "", "confidence": 0.0}
@@ -192,14 +192,14 @@ async def self_heal_node(state: AgentState) -> dict:
 
 async def _try_rule_based_fix(failure: dict) -> dict | None:
     """规则修复：超时→增加等待、网络抖动→重试"""
-    cfg = route("refine_locator")  # L1 Flash
+    cfg = route("refine_locator")  # Flash (low)
     # 实现常见规则匹配
     return None  # TODO
 
 
 async def _find_similar_locator(failure: dict) -> dict | None:
     """从向量定位器库查找相似元素"""
-    cfg = route("refine_locator")  # L1 Flash
+    cfg = route("refine_locator")  # Flash (low)
     # 从 Qdrant 检索历史成功的定位器
     return None  # TODO
 

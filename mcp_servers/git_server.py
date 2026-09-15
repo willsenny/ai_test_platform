@@ -40,7 +40,7 @@ async def list_tools() -> list[Tool]:
             input_schema={
                 "type": "object",
                 "properties": {
-                    "files": {"type": "object", "description": "{"path": "content"}"},
+                    "files": {"type": "object", "description": '{"path": "content"}'},
                     "message": {"type": "string"},
                 },
                 "required": ["files", "message"],

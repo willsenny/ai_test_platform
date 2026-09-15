@@ -1,8 +1,8 @@
 """
 LLM 调用适配层
 
-统一使用 litellm 调用，自动适配 DeepSeek / Claude / 本地模型。
-配合 router.py 的分层路由，实现成本最优。
+统一使用 litellm 调用，自动适配 DeepSeek Flash / 本地 Ollama 兜底。
+配合 router.py 的 reasoning 档位路由，实现成本最优。
 """
 import os
 import json
@@ -34,7 +34,7 @@ async def call_llm(
         dict: {"content": str, "usage": {...}}
 
     Usage:
-        cfg = route("generate_testcase")  # → L1 Flash
+        cfg = route("generate_testcase")  # → Flash (low)
         result = await call_llm(cfg, prompt)
         # or with structured output:
         result = await call_llm(cfg, prompt, response_schema=TestCase)
@@ -74,20 +74,19 @@ async def call_llm(
 
     # 记录成本
     tracker = get_cost_tracker()
-    tracker.record(config.tier, usage["input_tokens"], usage["output_tokens"])
+    tracker.record(usage["input_tokens"], usage["output_tokens"])
 
     return {"content": content, "usage": usage}
 
 
 def _to_litellm_model(config: ModelConfig) -> str:
     """转换为 litellm 模型标识符"""
-    if "anthropic" in config.base_url:
-        return f"anthropic/{config.model}"
-    elif "deepseek" in config.base_url:
+    if "deepseek" in config.base_url:
         return f"deepseek/{config.model}"
     else:
-        # 自定义 OpenAI 兼容端点
+        # 自定义 OpenAI 兼容端点（本地 Ollama 等）
         os.environ["OPENAI_API_BASE"] = config.base_url
+        os.environ["OPENAI_API_KEY"] = config.api_key
         return f"openai/{config.model}"
 
 
@@ -103,7 +102,7 @@ async def _fallback_call(config: ModelConfig, prompt: str, system: str = "") -> 
     import httpx
 
     headers = {
-        "Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}",
+        "Authorization": f"Bearer {config.api_key}",
         "Content-Type": "application/json",
     }
     payload = {
@@ -128,7 +127,7 @@ async def _fallback_call(config: ModelConfig, prompt: str, system: str = "") -> 
     usage = data.get("usage", {})
 
     tracker = get_cost_tracker()
-    tracker.record(config.tier, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
+    tracker.record(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
 
     return {"content": content, "usage": usage}
 
