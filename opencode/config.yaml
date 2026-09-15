@@ -1,0 +1,174 @@
+# OpenCode 配置 - AI 测试管理平台
+# 模型策略：DeepSeek 为主 (Flash + Pro)，Claude Sonnet 兜底
+
+model:
+  # 默认模型 (日常补全/批量生成)
+  default: deepseek/deepseek-chat  # Flash
+
+  # 模型列表
+  models:
+    - id: deepseek/deepseek-chat
+      name: DeepSeek V4 Flash
+      provider: deepseek
+      base_url: ${DEEPSEEK_BASE_URL}
+      api_key: ${DEEPSEEK_API_KEY}
+      tier: l1
+      # 定价 (每百万 token)
+      pricing:
+        input: 0.14
+        output: 0.28
+        cached: 0.0028
+
+    - id: deepseek/deepseek-reasoner
+      name: DeepSeek V4 Pro
+      provider: deepseek
+      base_url: ${DEEPSEEK_BASE_URL}
+      api_key: ${DEEPSEEK_API_KEY}
+      tier: l2
+      pricing:
+        input: 0.435
+        output: 2.5
+
+    - id: anthropic/claude-sonnet-4-6
+      name: Claude Sonnet 4.6
+      provider: anthropic
+      base_url: ${ANTHROPIC_BASE_URL}
+      api_key: ${ANTHROPIC_API_KEY}
+      tier: l3
+      pricing:
+        input: 3.0
+        output: 15.0
+      # 仅在自愈/疑难根因时使用
+
+# 模型路由规则（与 platform/apps/agent/router.py 对齐）
+router:
+  # 默认走 Flash
+  default: l1
+
+  # 任务类型 → 层级
+  rules:
+    # L1: 批量确定性 (70%)
+    - pattern: "generate_*|refine_*|summarize_*|classify_*|draft_*"
+      tier: l1
+    # L2: 复杂编排 (25%)
+    - pattern: "refactor_*|design_*|review_*|analyze_*"
+      tier: l2
+    # L3: 疑难 (5%)
+    - pattern: "root_cause*|self_heal*|complex_debug*"
+      tier: l3
+
+# MCP 配置（复用 platform/apps/mcp/config.json）
+mcp:
+  config_file: ../platform/apps/mcp/config.json
+  servers:
+    - playwright      # stdio - 官方 Playwright MCP
+    - api             # stdio - 接口测试
+    - db              # stdio - 数据库断言
+    - git             # stdio - 自愈开 PR
+    - wharttest_tools # SSE   - WHartTest 生态兼容
+
+# Skills（可插拔能力包）
+skills:
+  # 直接复用 WHartTest 的 Skill 定义，注册为 OpenCode Skill
+  - name: test-generator
+    description: |
+      从需求文档生成测试用例（LangGraph 编排）
+      需求 → RAG 检索 → 场景设计 → 步骤生成 → 断言
+    triggers:
+      - "生成测试用例"
+      - "写测试"
+      - "test case"
+    command: |
+      python -c "
+      from platform.apps.agent.graph import run_test_workflow
+      import asyncio
+      result = asyncio.run(run_test_workflow(
+          requirement='{input}',
+          project_id='{project_id}',
+      ))
+      print(result)
+      "
+    model: l1  # 默认 Flash
+
+  - name: self-heal
+    description: |
+      自愈引擎：失败用例 → 五段闭环 → 自动开 PR
+    triggers:
+      - "自愈"
+      - "修复测试"
+      - "self heal"
+    command: |
+      python -c "
+      from platform.apps.selfheal.engine import heal_failure
+      from platform.apps.selfheal.engine import FailureContext
+      import asyncio
+      result, pr = await heal_failure(
+          FailureContext(
+              test_id='{test_id}',
+              error_message='{error}',
+              locator='{locator}',
+          ),
+          retry_budget=3,
+      )
+      print(result, pr)
+      "
+    model: l3  # 自愈用 Sonnet 兜底（但规则/向量阶段仍走 Flash）
+
+  - name: api-tester
+    description: |
+      从 OpenAPI 规范自动生成接口测试用例
+    triggers:
+      - "接口测试"
+      - "api test"
+      - "生成接口用例"
+    command: |
+      python -c "
+      from platform.apps.mcp.client import call_tool
+      import asyncio
+      result = await call_tool('api', 'load_openapi', {'spec_url': '{openapi_url}'})
+      print(result)
+      "
+    model: l2  # Pro 处理多文件
+
+  - name: rag-ingest
+    description: |
+      将 PRD/接口文档/历史用例 入库 RAG 知识库
+    triggers:
+      - "导入文档"
+      - "入库"
+      - "ingest"
+    command: |
+      python -c "
+      from platform.apps.rag.service import ingest_document
+      from platform.apps.rag.service import Document
+      import asyncio
+      doc = Document(
+          content=open('{file_path}').read(),
+          source='{file_path}',
+          doc_type='{doc_type}',  # prd/api_spec/testcase/bug/rule
+          project_id='{project_id}',
+      )
+      asyncio.run(ingest_document(doc))
+      print('Ingested:', doc.source)
+      "
+
+# Agent 模式配置
+agent:
+  mode: plan  # plan / auto
+  # plan 模式：先展示计划再执行（推荐用于平台开发）
+  max_iterations: 25
+  # 上下文管理
+  context:
+    compression: auto
+    summary_threshold: 80000  # tokens
+
+# 成本保护（防止无限重试）
+cost_control:
+  daily_budget_usd: 10.0       # 每日预算上限
+  per_task_budget_usd: 0.5     # 单任务上限
+  alert_threshold: 0.8         # 80% 时告警
+
+# 隐私/合规
+privacy:
+  telemetry: false             # 不上传任何数据
+  log_level: info

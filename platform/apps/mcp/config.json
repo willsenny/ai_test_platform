@@ -1,0 +1,31 @@
+{
+  "playwright": {
+    "transport": "stdio",
+    "command": "npx",
+    "args": ["@playwright/mcp@latest", "--headless"],
+    "env": {}
+  },
+  "api": {
+    "transport": "stdio",
+    "command": "python",
+    "args": ["/data/workspace/ai_test_platform/mcp_servers/api_server.py"],
+    "env": {}
+  },
+  "db": {
+    "transport": "stdio",
+    "command": "python",
+    "args": ["/data/workspace/ai_test_platform/mcp_servers/db_server.py"],
+    "env": {}
+  },
+  "git": {
+    "transport": "stdio",
+    "command": "python",
+    "args": ["/data/workspace/ai_test_platform/mcp_servers/git_server.py"],
+    "env": {}
+  },
+  "wharttest_tools": {
+    "transport": "sse",
+    "url": "http://localhost:8090/sse",
+    "description": "WHartTest 内置工具 MCP (HTTP/SSE, 沿用 WHartTest 生态)"
+  }
+}

@@ -1,0 +1,39 @@
+# Environment
+.env
+.env.local
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+.pytest_cache/
+*.json report
+pytest_report.json
+test-results/
+
+# Qdrant data
+qdrant_data/
+pg_data/
+
+# Logs
+*.log
+logs/
