@@ -5,107 +5,36 @@ API 测试 MCP Server (stdio)
 - request:         发起 HTTP 请求 (GET/POST/PUT/DELETE)
 - assert_status:   状态码断言
 - assert_json:     JSON 字段断言
-- assert_schema:   JSON Schema 校验
 - load_openapi:    从 OpenAPI 规范自动生成测试用例
 
 配合 httpx + pytest 实现接口自动化。
 """
-import asyncio
-import json
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+import json as _json
+
+from mcp.server import MCPServer
+
+mcp = MCPServer("api-test")
 
 
-server = Server("api-test")
-
-
-@server.list_tools()
-async def list_tools() -> list[Tool]:
-    return [
-        Tool(
-            name="request",
-            description="发起 HTTP 请求",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"]},
-                    "url": {"type": "string"},
-                    "headers": {"type": "object"},
-                    "json": {"type": "object"},
-                    "params": {"type": "object"},
-                },
-                "required": ["method", "url"],
-            },
-        ),
-        Tool(
-            name="assert_status",
-            description="断言响应状态码",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "expected": {"type": "integer"},
-                    "actual": {"type": "integer"},
-                },
-                "required": ["expected", "actual"],
-            },
-        ),
-        Tool(
-            name="assert_json",
-            description="断言 JSON 响应中的字段值",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "response": {"type": "object"},
-                    "path": {"type": "string", "description": "JSONPath 表达式"},
-                    "expected": {"type": "string"},
-                },
-                "required": ["response", "path", "expected"],
-            },
-        ),
-        Tool(
-            name="load_openapi",
-            description="加载 OpenAPI 规范，自动生成接口测试用例",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "spec_url": {"type": "string", "description": "OpenAPI JSON URL"},
-                },
-                "required": ["spec_url"],
-            },
-        ),
-    ]
-
-
-@server.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[TextContent]:
-    if name == "request":
-        return await _request(arguments)
-    elif name == "assert_status":
-        return await _assert_status(arguments)
-    elif name == "assert_json":
-        return await _assert_json(arguments)
-    elif name == "load_openapi":
-        return await _load_openapi(arguments)
-    return [TextContent(type="text", text=f"Unknown tool: {name}")]
-
-
-async def _request(args: dict) -> list[TextContent]:
-    """使用 httpx 发起异步 HTTP 请求"""
+# ============================================================
+# 工具定义
+# ============================================================
+@mcp.tool(name="request", description="发起 HTTP 请求（返回 JSON 字符串）")
+async def request(
+    method: str,
+    url: str,
+    headers: dict | None = None,
+    json: dict | None = None,
+    params: dict | None = None,
+) -> str:
     import httpx
-
-    method = args["method"]
-    url = args["url"]
-    headers = args.get("headers", {})
-    json_body = args.get("json")
-    params = args.get("params")
 
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.request(
             method=method,
             url=url,
-            headers=headers,
-            json=json_body,
+            headers=headers or {},
+            json=json,
             params=params,
         )
 
@@ -115,47 +44,42 @@ async def _request(args: dict) -> list[TextContent]:
         "body": _safe_json(resp),
         "elapsed_ms": resp.elapsed.total_seconds() * 1000,
     }
-    return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+    return _json.dumps(result, ensure_ascii=False, indent=2)
 
 
-async def _assert_status(args: dict) -> list[TextContent]:
-    expected = args["expected"]
-    actual = args["actual"]
+@mcp.tool(name="assert_status", description="断言响应状态码")
+async def assert_status(expected: int, actual: int) -> str:
     passed = expected == actual
-    return [TextContent(type="text", text=json.dumps({
+    return _json.dumps({
         "passed": passed,
         "expected": expected,
         "actual": actual,
         "message": "" if passed else f"Expected {expected}, got {actual}",
-    }, ensure_ascii=False))]
+    }, ensure_ascii=False)
 
 
-async def _assert_json(args: dict) -> list[TextContent]:
-    """使用 JSONPath 提取字段并断言"""
+@mcp.tool(name="assert_json", description="断言 JSON 响应中的字段值（JSONPath）")
+async def assert_json(response: dict, path: str, expected: str) -> str:
     import jsonpath_ng
-    response = args["response"]
-    path_expr = args["path"]
-    expected = args["expected"]
 
-    jsonpath_expr = jsonpath_ng.parse(path_expr)
+    jsonpath_expr = jsonpath_ng.parse(path)
     matches = [match.value for match in jsonpath_expr.find(response)]
     passed = expected in [str(m) for m in matches]
 
-    return [TextContent(type="text", text=json.dumps({
+    return _json.dumps({
         "passed": passed,
         "matches": matches,
         "expected": expected,
-    }, ensure_ascii=False))]
+    }, ensure_ascii=False)
 
 
-async def _load_openapi(args: dict) -> list[TextContent]:
-    """
-    从 OpenAPI 规范自动生成接口测试用例。
-    遍历所有 path + method，生成正向/异常用例。
-    """
+@mcp.tool(
+    name="load_openapi",
+    description="加载 OpenAPI 规范，自动生成接口测试用例（正向/异常）",
+)
+async def load_openapi(spec_url: str) -> str:
     import httpx
 
-    spec_url = args["spec_url"]
     async with httpx.AsyncClient() as client:
         resp = await client.get(spec_url)
         spec = resp.json()
@@ -163,14 +87,12 @@ async def _load_openapi(args: dict) -> list[TextContent]:
     test_cases = []
     for path, operations in spec.get("paths", {}).items():
         for method, operation in operations.items():
-            # 正向用例
             test_cases.append({
                 "name": f"test_{operation.get('operationId', method + path)}",
                 "method": method.upper(),
                 "path": path,
                 "type": "positive",
             })
-            # 参数缺失异常
             if operation.get("parameters"):
                 test_cases.append({
                     "name": f"test_{operation.get('operationId', method + path)}_missing_param",
@@ -179,23 +101,18 @@ async def _load_openapi(args: dict) -> list[TextContent]:
                     "type": "negative",
                 })
 
-    return [TextContent(type="text", text=json.dumps({
+    return _json.dumps({
         "total": len(test_cases),
         "test_cases": test_cases,
-    }, ensure_ascii=False, indent=2))]
+    }, ensure_ascii=False, indent=2)
 
 
-def _safe_json(resp: "httpx.Response") -> dict:
+def _safe_json(resp) -> dict:
     try:
         return resp.json()
     except Exception:
         return {"raw": resp.text}
 
 
-async def main():
-    async with stdio_server() as (read, write):
-        await server.run(read, write, server.create_initialization_options())
-
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    mcp.run("stdio")

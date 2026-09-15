@@ -5,9 +5,19 @@ WHartTest 技术栈: Django 5.2 + DRF + Vue 前端
 本项目在其基础上扩充 RAG / Agent / MCP / SelfHeal 模块。
 """
 from pathlib import Path
+from urllib.parse import urlparse
 import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+PLATFORM_DIR = Path(__file__).resolve().parent.parent
+
+# 加载 platform/.env（Phase C 依赖 python-dotenv）
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(PLATFORM_DIR / ".env")
+except ImportError:
+    pass
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "change-me")
 DEBUG = os.getenv("DEBUG", "True") == "True"
@@ -47,6 +57,12 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = "config.urls"
 
+# ============================================================
+# Media（执行报告输出：media/reports/run_{id}.html）
+# ============================================================
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
@@ -68,8 +84,20 @@ WSGI_APPLICATION = "config.wsgi.application"
 # ============================================================
 # 数据库（沿用 WHartTest PostgreSQL 配置）
 # ============================================================
-DATABASES = {
-    "default": {
+def _db_from_env() -> dict:
+    """支持 DATABASE_URL 或 DB_* 两种配置方式。"""
+    url = os.getenv("DATABASE_URL", "")
+    if url:
+        parsed = urlparse(url)
+        return {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": (parsed.path or "/ai_test").lstrip("/"),
+            "USER": parsed.username or "",
+            "PASSWORD": parsed.password or "",
+            "HOST": parsed.hostname or "localhost",
+            "PORT": str(parsed.port or 5432),
+        }
+    return {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": os.getenv("DB_NAME", "ai_test"),
         "USER": os.getenv("DB_USER", "postgres"),
@@ -77,7 +105,9 @@ DATABASES = {
         "HOST": os.getenv("DB_HOST", "localhost"),
         "PORT": os.getenv("DB_PORT", "5432"),
     }
-}
+
+
+DATABASES = {"default": _db_from_env()}
 
 # ============================================================
 # DRF
@@ -118,13 +148,33 @@ AGENT_CONFIG = {
 # RAG 配置（沿用 WHartTest: Qdrant + Reranker + Xinference）
 # ============================================================
 RAG_CONFIG = {
+    # Phase G：RAG 总开关；置 0 时检索返回空、写入跳过（系统降级）
+    "enabled": os.getenv("RAG_ENABLED", "1").strip().lower()
+    not in ("0", "false", "no", "off"),
     "qdrant_url": os.getenv("QDRANT_URL", "http://localhost:6333"),
     "qdrant_api_key": os.getenv("QDRANT_API_KEY"),
+    # auto: 先试远端 Qdrant，不可达则回退本地嵌入式 store（无 Docker 时可用）
+    "qdrant_mode": os.getenv("QDRANT_MODE", "auto"),
+    "qdrant_local_path": os.getenv(
+        "QDRANT_LOCAL_PATH", str(PLATFORM_DIR / ".qdrant_local")
+    ),
+    # Phase G collections
+    "collections": {
+        "testcases": "testcases",
+        "step_results": "step_results",
+        "heal_logs": "heal_logs",
+    },
+    # 仅用 score 阈值过滤（不接 reranker）
+    "score_threshold": float(os.getenv("RAG_SCORE_THRESHOLD", "0.0")),
+    # 开发用 FakeEmbedder(dim=8)；生产 RAG_EMBEDDER=bge + Embedding HTTP 服务
+    "embedder": os.getenv("RAG_EMBEDDER", "fake"),
+    "fake_dim": int(os.getenv("RAG_FAKE_DIM", "8")),
+    # 兼容旧知识库 collection
     "collection": "test_knowledge",
     "embedding": {
         "base_url": os.getenv("EMBEDDING_BASE_URL", "http://localhost:8000/v1"),
-        "model": os.getenv("EMBEDDING_MODEL", "BAAI/bge-large-zh-v1.5"),
-        "dimension": 1024,
+        "model": os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3"),
+        "dimension": int(os.getenv("EMBEDDING_DIM", "1024")),
     },
     "reranker": {
         "base_url": os.getenv("RERANK_BASE_URL", "http://localhost:8001"),

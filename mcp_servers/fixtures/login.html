@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Demo Login</title>
+</head>
+<body>
+  <h1>AI 测试平台登录示例</h1>
+  <form id="login-form" onsubmit="return false;">
+    <label for="phone">手机号</label>
+    <input id="phone" name="phone" type="text" placeholder="手机号" />
+    <label for="code">验证码</label>
+    <input id="code" name="code" type="text" placeholder="验证码" />
+    <button id="submit" type="button">登录</button>
+    <button id="slow-submit" type="button" disabled>慢速登录</button>
+  </form>
+  <div id="result"></div>
+
+  <script>
+    (function () {
+      function doLogin() {
+        var phone = (document.getElementById("phone").value || "").trim();
+        var code = (document.getElementById("code").value || "").trim();
+        var result = document.getElementById("result");
+        if (phone && code) {
+          result.textContent = "登录成功";
+          result.setAttribute("data-status", "ok");
+        } else {
+          result.textContent = "登录失败";
+          result.setAttribute("data-status", "err");
+        }
+      }
+
+      document.getElementById("submit").addEventListener("click", doLogin);
+
+      // 延迟 3s 才可用的按钮，用于触发 timing 失败
+      setTimeout(function () {
+        document.getElementById("slow-submit").disabled = false;
+      }, 3000);
+      document.getElementById("slow-submit").addEventListener("click", doLogin);
+    })();
+  </script>
+</body>
+</html>

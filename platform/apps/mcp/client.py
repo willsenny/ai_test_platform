@@ -11,10 +11,15 @@ MCP 客户端：统一管理 stdio (本地) + SSE (远程) MCP Server
      以兼容 OpenCode / Claude Code 生态。
 """
 import os
+import sys
 import json
 import asyncio
+from pathlib import Path
 from typing import Any, Optional
 from contextlib import AsyncExitStack
+
+# 仓库根目录：platform/apps/mcp/client.py → 上溯 3 层
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 class MCPClient:
@@ -26,10 +31,12 @@ class MCPClient:
             result = await client.call_tool("playwright", "run_tests", {...})
     """
 
-    def __init__(self):
+    def __init__(self, servers: Optional[list[str]] = None):
         self._stack = AsyncExitStack()
         self._sessions: dict[str, Any] = {}
         self._config: dict[str, dict] = {}
+        # None = 连接配置中的全部 server；也可用 MCP_ENABLED_SERVERS 环境变量过滤
+        self._servers = servers
 
     async def __aenter__(self):
         await self._load_config()
@@ -50,13 +57,41 @@ class MCPClient:
                 self._config = json.load(f)
 
     async def _connect_all(self):
-        """连接所有配置的 MCP Server"""
+        """连接配置的 MCP Server（可按 servers / MCP_ENABLED_SERVERS 过滤）"""
+        enabled = self._servers
+        if enabled is None:
+            env = os.getenv("MCP_ENABLED_SERVERS", "")
+            if env.strip():
+                enabled = [s.strip() for s in env.split(",") if s.strip()]
+
         for name, cfg in self._config.items():
+            if enabled is not None and name not in enabled:
+                continue
             transport = cfg.get("transport", "stdio")
             if transport == "stdio":
                 await self._connect_stdio(name, cfg)
             elif transport in ("sse", "http"):
                 await self._connect_sse(name, cfg)
+
+    @staticmethod
+    def _resolve_command(command: str) -> str:
+        """`python`/`python3` 使用当前解释器，确保子进程与当前 venv 一致。"""
+        if command in ("python", "python3"):
+            return sys.executable
+        return command
+
+    @staticmethod
+    def _resolve_args(args: list[str]) -> list[str]:
+        """把相对路径参数解析为相对仓库根目录的绝对路径。"""
+        resolved = []
+        for arg in args:
+            if not os.path.isabs(arg):
+                candidate = _REPO_ROOT / arg
+                if candidate.exists():
+                    resolved.append(str(candidate))
+                    continue
+            resolved.append(arg)
+        return resolved
 
     async def _connect_stdio(self, name: str, cfg: dict):
         """连接 stdio MCP Server (如官方 Playwright MCP)"""
@@ -64,9 +99,9 @@ class MCPClient:
         from mcp.client.stdio import stdio_client
 
         params = StdioServerParameters(
-            command=cfg["command"],
-            args=cfg.get("args", []),
-            env=cfg.get("env"),
+            command=self._resolve_command(cfg["command"]),
+            args=self._resolve_args(cfg.get("args", [])),
+            env=cfg.get("env") or None,
         )
         # 使用 exit stack 管理生命周期
         read, write = await self._stack.enter_async_context(
@@ -97,13 +132,13 @@ class MCPClient:
         self,
         server: str,
         tool: str,
-        arguments: dict,
+        arguments: Optional[dict] = None,
     ) -> Any:
         """调用指定 MCP Server 的工具"""
         session = self._sessions.get(server)
         if not session:
             raise RuntimeError(f"MCP server '{server}' not connected")
-        result = await session.call_tool(tool, arguments)
+        result = await session.call_tool(tool, arguments or {})
         return _parse_tool_result(result)
 
     async def list_tools(self, server: str) -> list[dict]:

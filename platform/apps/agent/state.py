@@ -27,10 +27,29 @@ class AgentState(TypedDict, total=False):
     # RAG
     retrieved_context: list[dict]       # [{"content": ..., "score": ..., "source": ...}]
 
+    # Phase G RAG
+    retrieved_cases: list[dict]         # [{"id", "payload", "score"}] 历史相似用例
+    few_shot_used: int                  # 注入生成器的历史用例数
+
     # 生成
     test_cases: list[TestCase]
     api_test_code: str                  # 生成的 pytest 代码
     ui_test_code: str                   # 生成的 Playwright 代码
+
+    # Phase C 最小闭环
+    plan: list[str]                     # planner 节点的执行计划
+    case_count: int                     # 期望生成的用例数
+    saved_ids: list[int]                # reporter 写入 DB 后的主键
+
+    # Phase D 执行
+    execute: bool                       # 是否在生成后自动执行
+    execution_run_id: int               # Phase E: TestRun 批次主键
+    execution_report: dict              # Phase E: 报告路径 {"json","html"}
+
+    # Phase F 自愈
+    self_heal: bool                     # 执行失败后是否自动自愈
+    inject_failure: str                 # 演示用：selector/assertion/timing/none
+    heal_results: list[dict]            # 自愈结果
 
     # 执行
     execution_results: list[dict]      # [{"case_id": ..., "passed": ..., "error": ...}]

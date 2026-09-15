@@ -178,3 +178,46 @@ class TestMCPClient:
         # 验证 WHartTest SSE 兼容
         assert "wharttest_tools" in config
         assert config["wharttest_tools"]["transport"] == "sse"
+
+
+class TestSelfHealRules:
+    """Phase F 规则自愈：失败分类 + selector 模糊匹配"""
+
+    def test_classify_selector(self):
+        from apps.selfheal.analyzer import classify
+
+        error = (
+            "TimeoutError: Page.fill: Timeout 1000ms exceeded.\n"
+            "Call log:\n  - waiting for locator(\"#code_old\")"
+        )
+        assert classify("step", "", "", error)[0] == "element_not_found"
+
+    def test_classify_assertion(self):
+        from apps.selfheal.analyzer import classify
+
+        assert classify("assert", "登录OK", "登录成功", "")[0] == "text_mismatch"
+
+    def test_classify_timing(self):
+        from apps.selfheal.analyzer import classify
+
+        error = (
+            "locator.click: Timeout 1000ms exceeded. Call log: "
+            "- waiting for element to be visible, enabled and stable"
+        )
+        assert classify("step", "", "", error)[0] == "timeout"
+
+    def test_classify_navigation(self):
+        from apps.selfheal.analyzer import classify
+
+        assert classify("step", "", "", "net::ERR_CONNECTION_REFUSED")[0] == "navigation_failed"
+
+    def test_selector_fuzzy_match(self):
+        from apps.selfheal.fixer import _best_match, _selector_for, _tokens
+
+        elements = [
+            {"id": "phone", "name": "phone", "placeholder": "手机号"},
+            {"id": "code", "name": "code", "placeholder": "验证码"},
+        ]
+        best, score = _best_match(elements, _tokens("#code_old"))
+        assert score >= 1
+        assert _selector_for(best) == "#code"

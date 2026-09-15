@@ -1,26 +1,32 @@
 {
+  "echo": {
+    "transport": "stdio",
+    "command": "python",
+    "args": ["mcp_servers/echo_server.py"],
+    "env": {}
+  },
   "playwright": {
     "transport": "stdio",
-    "command": "npx",
-    "args": ["@playwright/mcp@latest", "--headless"],
+    "command": "python",
+    "args": ["mcp_servers/playwright_server.py"],
     "env": {}
   },
   "api": {
     "transport": "stdio",
     "command": "python",
-    "args": ["/data/workspace/ai_test_platform/mcp_servers/api_server.py"],
+    "args": ["mcp_servers/api_server.py"],
     "env": {}
   },
   "db": {
     "transport": "stdio",
     "command": "python",
-    "args": ["/data/workspace/ai_test_platform/mcp_servers/db_server.py"],
+    "args": ["mcp_servers/db_server.py"],
     "env": {}
   },
   "git": {
     "transport": "stdio",
     "command": "python",
-    "args": ["/data/workspace/ai_test_platform/mcp_servers/git_server.py"],
+    "args": ["mcp_servers/git_server.py"],
     "env": {}
   },
   "wharttest_tools": {

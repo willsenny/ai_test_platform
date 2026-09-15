@@ -16,6 +16,11 @@ class TestCaseSerializer(serializers.ModelSerializer):
             "priority",
             "tags",
             "source",
+            "target_url",
+            "raw_steps",
+            "last_run_status",
+            "last_run_log",
+            "last_run_at",
             "created_at",
             "updated_at",
         ]

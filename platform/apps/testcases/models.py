@@ -24,6 +24,30 @@ class TestCase(models.Model):
     )
     tags = models.JSONField(default=list, blank=True)
     source = models.CharField(max_length=200, blank=True, default="")
+
+    # Phase D：结构化执行 + 最近一次执行结果
+    target_url = models.CharField(max_length=500, blank=True, default="")
+    raw_steps = models.JSONField(default=list, blank=True)
+
+    # DEPRECATED (Phase E): 改用 executor.TestRun / TestStepResult 存明细，
+    # 以下字段仅保留最近一次执行的摘要，逐步迁移后移除。
+    last_run_status = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        help_text="Deprecated: 见 TestRun / TestStepResult",
+    )
+    last_run_log = models.TextField(
+        blank=True,
+        default="",
+        help_text="Deprecated: 见 TestRun / TestStepResult",
+    )
+    last_run_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Deprecated: 见 TestRun / TestStepResult",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -327,3 +327,78 @@ async def heal_failure(
         pr_result = await engine.commit_fix(result)
 
     return result, pr_result
+
+
+# ============================================================
+# Phase F：规则驱动自愈闭环（基于 TestRun / TestStepResult）
+# ============================================================
+async def run(
+    case_id: int,
+    failed_step_ids: list[int] | None = None,
+    *,
+    retry_budget: int | None = None,
+) -> dict:
+    """
+    对一条失败用例执行自愈：分析 → 规则修复 → 重跑验证 → 经验沉淀。
+
+    Returns:
+        {"case_id", "healed", "failure_count", "attempts": [...]}
+    """
+    from asgiref.sync import sync_to_async
+
+    from apps.executor.executor import execute_case
+    from apps.testcases.models import TestCase
+
+    from .analyzer import analyze_case
+    from .fixer import apply_fix
+    from .learner import record
+
+    await sync_to_async(TestCase.objects.get)(pk=case_id)
+    features = await sync_to_async(analyze_case)(case_id, failed_step_ids)
+
+    attempts: list[dict] = []
+    healed = False
+
+    for feature in features:
+        fix = await apply_fix(case_id, feature)
+
+        rerun = None
+        success = False
+        if fix.success:
+            rerun = await execute_case(case_id)
+            success = rerun.get("status") == "pass"
+
+        log = await sync_to_async(record)(
+            feature.failure_type,
+            fix.strategy,
+            success,
+            testcase_id=case_id,
+            detail=f"{fix.detail}; rerun={rerun.get('status') if rerun else 'n/a'}",
+        )
+
+        attempts.append({
+            "step_id": feature.step_id,
+            "failure_type": feature.failure_type,
+            "suspect": feature.suspect,
+            "strategy": fix.strategy,
+            "fix_success": fix.success,
+            "old_value": fix.old_value,
+            "new_value": fix.new_value,
+            "detail": fix.detail,
+            "status_after": rerun.get("status") if rerun else None,
+            "healed": success,
+            "log": log,
+            "rag_failures": getattr(feature, "similar_failures", []) or [],
+            "rag_hint": getattr(fix, "rag_hint", "") or "",
+        })
+
+        if success:
+            healed = True
+            break
+
+    return {
+        "case_id": case_id,
+        "healed": healed,
+        "failure_count": len(features),
+        "attempts": attempts,
+    }

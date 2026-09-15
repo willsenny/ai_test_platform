@@ -33,6 +33,10 @@ test-results/
 # Qdrant data
 qdrant_data/
 pg_data/
+.qdrant_local/
+
+# Media (execution reports)
+media/
 
 # Logs
 *.log
