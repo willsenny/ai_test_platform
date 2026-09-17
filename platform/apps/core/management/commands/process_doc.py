@@ -48,19 +48,28 @@ class Command(BaseCommand):
         if doc.status == RequirementDoc.Status.FAILED:
             raise CommandError(f"parse failed: {doc.error_message}")
 
-        # ---- 离线 API 夹具（仅当需要且未配置时）----
+        # ---- 离线夹具（仅当需要且未配置时）----
         server = None
         api_base_url = options["api_base_url"]
+        ui_target_url = ""
         project = doc.project
-        need_api = any(s.get("type") == "api" for s in scenarios)
-        if (
-            need_api
-            and not api_base_url
-            and project is not None
-            and not project.api_base_url
-        ):
-            server, api_base_url = start_mock_api()
-            self.stdout.write(f"    [mock-api] {api_base_url}")
+        def _wants(scenario, key):
+            automation = scenario.get("automation") or {}
+            if automation:
+                return bool(automation.get(key))
+            return scenario.get("type") == key
+
+        need_api = any(_wants(s, "api") for s in scenarios)
+        need_ui = any(_wants(s, "ui") for s in scenarios)
+        if project is not None:
+            if need_api and not api_base_url and not project.api_base_url:
+                server, api_base_url = start_mock_api()
+                self.stdout.write(f"    [mock-api] {api_base_url}")
+            if need_ui and not project.base_url:
+                from apps.agent.generation import default_ui_target
+
+                ui_target_url = default_ui_target()
+                self.stdout.write(f"    [ui-fixture] {ui_target_url}")
 
         try:
             # ---- [2-5] 生成 → 执行 → 自愈 ----
@@ -69,6 +78,7 @@ class Command(BaseCommand):
                     doc_id,
                     project_id=options["project_id"],
                     api_base_url=api_base_url,
+                    ui_target_url=ui_target_url,
                     case_count=options["case_count"],
                     execute=not options["no_execute"],
                     self_heal=not options["no_heal"],

@@ -185,3 +185,33 @@ class TestGenerationBatch(models.Model):
             return 100
         done = min(self.generated, self.total)
         return int(done / self.total * 100)
+
+
+class LLMCall(models.Model):
+    """LLM 调用记录（成本 / 可观测）。"""
+
+    project = models.ForeignKey(
+        Project,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="llm_calls",
+    )
+    task = models.CharField(max_length=64, blank=True, default="")
+    model = models.CharField(max_length=100, blank=True, default="")
+    reasoning = models.CharField(max_length=16, blank=True, default="")
+    input_tokens = models.IntegerField(default=0)
+    output_tokens = models.IntegerField(default=0)
+    cost_usd = models.FloatField(default=0.0)
+    latency_ms = models.IntegerField(default=0)
+    success = models.BooleanField(default=True)
+    error = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "LLM 调用"
+        verbose_name_plural = "LLM 调用"
+
+    def __str__(self) -> str:
+        return f"[{self.task}] {self.model} {self.input_tokens}/{self.output_tokens} ${self.cost_usd}"

@@ -29,6 +29,7 @@ class AgentState(TypedDict, total=False):
     case_type: str                      # "ui" | "api"
     project_ref_pk: int                 # core.Project 主键
     api_base_url: str                   # API 根地址覆盖（可空）
+    ui_target_url: str                  # UI 地址覆盖（本地 fixture / 真实站点）
     source: str                         # 用例来源标记
 
     # RAG

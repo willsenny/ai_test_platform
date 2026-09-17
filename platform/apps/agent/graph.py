@@ -9,7 +9,6 @@ LangGraph 工作流编排
 from langgraph.graph import StateGraph, END
 from .state import AgentState
 from . import nodes
-import json
 
 
 def build_graph():
@@ -129,143 +128,34 @@ async def planner_node(state: AgentState) -> dict:
     return {"plan": plan, "retrieved_cases": cases}
 
 
-def _few_shot_payload(retrieved: list[dict]) -> str:
-    """把检索到的历史用例压缩为 few-shot JSON（title + steps）。"""
-    shots = []
-    for item in retrieved or []:
-        payload = item.get("payload", {}) if isinstance(item, dict) else {}
-        shots.append(
-            {
-                "title": payload.get("title", ""),
-                "steps": payload.get("steps", []),
-            }
-        )
-    return json.dumps(shots, ensure_ascii=False) if shots else ""
-
-
-def _login_fixture_url() -> str:
-    """本地登录示例页（file://），供确定性 UI 用例执行。"""
-    from pathlib import Path
-
-    fixture = (
-        Path(__file__).resolve().parents[3]
-        / "mcp_servers" / "fixtures" / "login.html"
-    )
-    return fixture.as_uri()
-
-
 async def generator_node(state: AgentState) -> dict:
-    """按场景类型生成用例：UI → Playwright steps；API → api_server MCP。"""
-    if state.get("case_type") == "api":
-        test_cases = await _generate_api_cases(state)
-    else:
-        test_cases = await _generate_ui_cases(state)
+    """LLM 生成三类用例（手动/UI/接口），按场景 automation 决定。"""
+    from apps.agent.generation import generate_for_scenario
+
+    scenario = dict(state.get("scenario") or {})
+    if not scenario:
+        primary = state.get("case_type", "ui")
+        scenario = {
+            "title": state.get("requirement", ""),
+            "type": primary,
+            "priority": "P1",
+            "tags": [],
+            "automation": {
+                "manual": False,
+                "ui": primary != "api",
+                "api": primary == "api",
+            },
+        }
+    test_cases = await generate_for_scenario(
+        scenario,
+        project_pk=state.get("project_ref_pk"),
+        api_base_url=state.get("api_base_url", ""),
+        ui_target_url=state.get("ui_target_url", ""),
+    )
     return {
         "test_cases": test_cases,
         "few_shot_used": len(state.get("retrieved_cases", [])),
     }
-
-
-async def _generate_ui_cases(state: AgentState) -> list[dict]:
-    """UI 场景：优先使用文档显式 steps，否则回退 echo MCP 生成。"""
-    from apps.mcp.client import MCPClient
-
-    scenario = state.get("scenario") or {}
-    spec = scenario.get("spec") or {}
-    if spec.get("type") == "ui" or spec.get("steps"):
-        target_url = spec.get("target_url") or _login_fixture_url()
-        steps = [dict(step) for step in spec.get("steps", [])]
-        for step in steps:
-            if (step.get("action") or "").lower() in ("goto", "navigate") and not step.get("value"):
-                step["value"] = target_url
-        return [
-            {
-                "title": scenario.get("title") or state["requirement"],
-                "preconditions": scenario.get("acceptance_criteria", []),
-                "steps": steps,
-                "assertions": spec.get("assertions", []),
-                "priority": scenario.get("priority", "P1"),
-                "tags": scenario.get("tags") or ["ui"],
-                "target_url": target_url,
-            }
-        ]
-
-    goal = state["requirement"]
-    count = int(state.get("case_count", 3))
-    few_shot = _few_shot_payload(state.get("retrieved_cases", []))
-    async with MCPClient(servers=["echo"]) as mcp:
-        raw = await mcp.call_tool(
-            "echo",
-            "fake_generate_test",
-            {"goal": goal, "count": count, "few_shot": few_shot},
-        )
-    return json.loads(raw) if isinstance(raw, str) else raw
-
-
-async def _generate_api_cases(state: AgentState) -> list[dict]:
-    """API 场景：构造 request steps + assertions，并经 api_server MCP 探测。"""
-    from apps.mcp.client import MCPClient
-
-    scenario = state.get("scenario") or {}
-    api = scenario.get("api") or {}
-    method = (api.get("method") or "GET").upper()
-    path = api.get("path") or ""
-    base_url = state.get("api_base_url") or ""
-    if path.startswith("http://") or path.startswith("https://"):
-        url = path
-    elif base_url:
-        url = base_url.rstrip("/") + (path if path.startswith("/") else f"/{path}")
-    else:
-        url = path
-
-    headers = api.get("headers") or {}
-    body = api.get("body") or {}
-    params = api.get("params") or {}
-    assertions = api.get("assertions") or [
-        {"type": "status_equals", "expected": api.get("expected_status", 200)}
-    ]
-
-    # Phase I：生成阶段经 api_server MCP 探测接口（失败不阻断）
-    baseline = {}
-    if url:
-        try:
-            async with MCPClient(servers=["api"]) as mcp:
-                raw = await mcp.call_tool(
-                    "api",
-                    "send_request",
-                    {
-                        "method": method,
-                        "url": url,
-                        "headers": headers,
-                        "json": body,
-                        "params": params,
-                    },
-                )
-            baseline = json.loads(raw) if isinstance(raw, str) else raw
-        except Exception as exc:  # noqa: BLE001
-            baseline = {"error": f"{type(exc).__name__}: {exc}"}
-
-    step = {
-        "action": "request",
-        "method": method,
-        "url": url,
-        "headers": headers,
-        "body": body,
-        "params": params,
-        "description": scenario.get("title") or state["requirement"],
-    }
-    return [
-        {
-            "title": scenario.get("title") or state["requirement"],
-            "preconditions": scenario.get("acceptance_criteria", []),
-            "steps": [step],
-            "assertions": assertions,
-            "priority": scenario.get("priority", "P1"),
-            "tags": scenario.get("tags") or ["api"],
-            "target_url": url,
-            "api_baseline": baseline,
-        }
-    ]
 
 
 def _save_test_cases(
@@ -284,6 +174,17 @@ def _save_test_cases(
         project = Project.objects.filter(pk=project_ref_pk).first()
 
     saved_ids: list[int] = []
+    scenario_ids = {
+        sid for sid in (c.get("scenario_id") for c in test_cases) if sid
+    }
+    scenarios = {}
+    if scenario_ids:
+        from apps.core.models import Scenario
+
+        scenarios = {
+            s.pk: s for s in Scenario.objects.filter(pk__in=scenario_ids)
+        }
+
     for case in test_cases:
         steps = case.get("steps", [])
         obj = TestCase.objects.create(
@@ -298,6 +199,12 @@ def _save_test_cases(
             source=source,
             target_url=case.get("target_url", ""),
             raw_steps=steps,
+            kind=case.get("kind", TestCase.Kind.AUTOMATED),
+            test_type=case.get("test_type", TestCase.TestType.UI),
+            module=case.get("module", ""),
+            scenario=scenarios.get(case.get("scenario_id")),
+            manual_steps=case.get("manual_steps", []),
+            expected_result=case.get("expected_result", ""),
         )
         saved_ids.append(obj.id)
     return saved_ids

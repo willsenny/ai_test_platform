@@ -1,6 +1,12 @@
 from django.contrib import admin
 
-from .models import Project, RequirementDoc, Scenario, TestGenerationBatch
+from .models import (
+    LLMCall,
+    Project,
+    RequirementDoc,
+    Scenario,
+    TestGenerationBatch,
+)
 
 
 @admin.register(Project)
@@ -36,3 +42,16 @@ class TestGenerationBatchAdmin(admin.ModelAdmin):
     )
     list_filter = ("status", "project")
     readonly_fields = ("case_ids", "run", "error_message")
+
+
+@admin.register(LLMCall)
+class LLMCallAdmin(admin.ModelAdmin):
+    list_display = (
+        "id", "task", "model", "reasoning",
+        "input_tokens", "output_tokens", "cost_usd", "latency_ms",
+        "success", "created_at",
+    )
+    list_filter = ("task", "model", "success")
+    readonly_fields = tuple(
+        f.name for f in LLMCall._meta.fields
+    )

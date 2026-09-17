@@ -28,11 +28,69 @@ def build_scenario_goal(scenario: dict) -> str:
     return "\n".join(p for p in parts if p)
 
 
+def scenario_to_dict(scenario) -> dict:
+    """core.Scenario → 生成用 dict（含 scenario_id 追溯）。"""
+    acceptance = list(scenario.acceptance or [])
+    criteria = [
+        (item.get("name", "") + "：" + "；".join(item.get("then", []))).strip("：")
+        for item in acceptance
+        if item.get("name") or item.get("then")
+    ]
+    description_parts = [p for p in (scenario.goal, scenario.benefit) if p]
+    if scenario.business_rules:
+        description_parts.append("业务规则：" + "；".join(scenario.business_rules))
+    test_types = list(scenario.test_types or [])
+    primary = "ui" if "ui" in test_types else ("api" if "api" in test_types else "functional")
+    return {
+        "scenario_id": scenario.pk,
+        "title": scenario.title,
+        "story_key": scenario.story_key,
+        "epic": scenario.epic,
+        "sprint": scenario.sprint,
+        "module": scenario.module,
+        "test_types": test_types,
+        "type": primary,
+        "priority": scenario.priority,
+        "story_points": scenario.story_points,
+        "role": scenario.role,
+        "goal": scenario.goal,
+        "benefit": scenario.benefit,
+        "business_rules": list(scenario.business_rules or []),
+        "test_data": dict(scenario.test_data or {}),
+        "acceptance": acceptance,
+        "definition_of_done": list(scenario.definition_of_done or []),
+        "automation": dict(scenario.automation or {}),
+        "api_ref": scenario.api_ref,
+        "env": dict(scenario.env or {}),
+        "tags": list(scenario.tags or []),
+        "raw_text": scenario.raw_text,
+        "description": "\n".join(description_parts),
+        "acceptance_criteria": criteria,
+    }
+
+
 # ------------------------------------------------------------
 # DB helpers（同步，供 sync_to_async 包装）
 # ------------------------------------------------------------
 def _load_doc(doc_id: int) -> RequirementDoc:
     return RequirementDoc.objects.select_related("project").get(pk=doc_id)
+
+
+def _load_scenarios(doc_id: int) -> list:
+    from apps.core.models import Scenario
+
+    return list(Scenario.objects.filter(doc_id=doc_id).order_by("id"))
+
+
+def _automated_case_ids(case_ids: list[int]) -> list[int]:
+    """手动用例不参与自动执行。"""
+    from apps.testcases.models import TestCase
+
+    return list(
+        TestCase.objects.filter(
+            id__in=case_ids, kind=TestCase.Kind.AUTOMATED
+        ).values_list("id", flat=True)
+    )
 
 
 def _load_project(project_id) -> Project | None:
@@ -70,6 +128,7 @@ async def generate_from_doc(
     *,
     project_id=None,
     api_base_url: str = "",
+    ui_target_url: str = "",
     case_count: int = 3,
     execute: bool = True,
     self_heal: bool = True,
@@ -85,7 +144,11 @@ async def generate_from_doc(
             f"RequirementDoc #{doc_id} has no project and no project_id given"
         )
 
-    scenarios = list(doc.parsed_scenarios or [])
+    scenario_rows = await sync_to_async(_load_scenarios)(doc.pk)
+    if scenario_rows:
+        scenarios = [scenario_to_dict(s) for s in scenario_rows]
+    else:
+        scenarios = list(doc.parsed_scenarios or [])
     batch = await sync_to_async(_create_batch)(project.pk, doc.pk, len(scenarios))
     await sync_to_async(_mark_doc)(
         doc.pk, RequirementDoc.Status.GENERATING, ""
@@ -104,6 +167,7 @@ async def generate_from_doc(
             "scenario": scenario,
             "case_count": case_count,
             "api_base_url": api_base_url or project.api_base_url,
+            "ui_target_url": ui_target_url or project.base_url,
             "source": source,
             "test_cases": [],
             "retrieved_cases": [],
@@ -123,12 +187,13 @@ async def generate_from_doc(
 
     executed = 0
     healed = 0
-    if execute and case_ids:
+    automated_ids = await sync_to_async(_automated_case_ids)(case_ids)
+    if execute and automated_ids:
         from apps.executor.executor import execute_cases
 
         try:
             result = await execute_cases(
-                case_ids,
+                automated_ids,
                 goal=doc.title or f"doc#{doc.pk}",
                 source=source,
                 project_id=project.key,

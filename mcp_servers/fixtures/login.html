@@ -22,9 +22,12 @@
         var phone = (document.getElementById("phone").value || "").trim();
         var code = (document.getElementById("code").value || "").trim();
         var result = document.getElementById("result");
-        if (phone && code) {
+        if (phone && code === "123456") {
           result.textContent = "登录成功";
           result.setAttribute("data-status", "ok");
+        } else if (phone && code) {
+          result.textContent = "验证码错误";
+          result.setAttribute("data-status", "err");
         } else {
           result.textContent = "登录失败";
           result.setAttribute("data-status", "err");

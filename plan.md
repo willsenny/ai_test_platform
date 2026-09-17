@@ -344,3 +344,24 @@ Scenario: 正常登录
 - **M2 内网站点**：`site_explorer_server`（爬取 + 页面模型）+ 简单登录认证（`storage_state`），真实站点替换本地 fixture。约 10–14 人日。
 - **M3 服务器 + CICD**：Celery/Redis、SSE 进度、定时回归、GitHub Actions/JUnit 导出、通知、多人权限。约 15–20 人日。
 - **延后**：Swagger 鉴权 token、Postman、PDF/DOCX/Confluence、reranker、截图录像、多租户。
+
+## Phase J 实施进展
+
+### Step 1 ✅（完成）
+- `templates/requirements/story_template.md`（Jira Story + Gherkin 模板）、`tests/fixtures/story_requirements.md`。
+- `apps/core/parsers/story_parser.py`（Epic/Sprint/Story、As a/I want/So that、业务规则、测试数据、Gherkin AC、DoD、automation、api_ref、env）；`parser_factory` 按文本特征选 StoryParser。
+- `Scenario` 模型 + 迁移 `core.0003` + admin；`doc_service` 幂等重建 Scenario。
+- 验证：解析 2 Story（ACC-101/102）；`process_doc` 解析→生成→执行串联；`pytest` 53 passed。
+
+### Step 2 ✅（完成）
+- `apps/agent/schemas.py`：`ManualCase/UICase/ApiCase` 三类 pydantic schema。
+- `apps/agent/prompts/`：手动/UI/接口提示词（注入 Story + Gherkin + 测试数据 + API/UI 地址）。
+- `apps/agent/generation.py`：`call_structured`（JSON 提取 + pydantic 校验 + 一次修复）、`generate_for_scenario`（按 automation 生成三类）、去重、`LLMCall` 成本记录。
+- `apps/agent/graph.py::generator_node` 改为 LLM 生成（移除 echo 兜底）；`_save_test_cases` 写入 `kind/test_type/module/scenario/manual_steps/expected_result`。
+- `TestCase` 新增字段 + 迁移 `testcases.0005`；`LLMCall` + 迁移 `core.0004`；admin 注册。
+- `generation_service` 改用 `Scenario` 行并注入 `scenario_id`；自动执行仅取自动化用例。
+- `manage.py llm_smoke`：真实 DeepSeek Flash 调用 + 结构化输出验证。
+- **关键修复**：DeepSeek Flash 默认 thinking 会耗尽 `max_tokens` 导致 content 为空 → low 档 `thinking=disabled`、high 档 `thinking=enabled` + `reasoning_effort`；`status_equals` 断言 int/str 兼容。
+- `executor` 跳过手动用例；`mock_api.py` 实现登录业务规则（空值/格式/错误码）。
+- 验证：Story 文档 → 37 用例（22 手动 / 2 UI / 13 接口），`LLMCall` 12 条（成本入库，约 $0.01）；`pytest` 68 passed；`process_doc` 6/15 自动化通过（其余为 mock 与 LLM 期望差异，待 Step 3 Swagger / Step 4 页面上下文提升）。
+- **未完成**：Step 3 Swagger、Step 4 页面感知 UI 生成、Step 5 导出、Step 6 自愈增强、Step 7 审核界面。

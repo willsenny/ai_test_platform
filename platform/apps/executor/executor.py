@@ -251,8 +251,12 @@ async def _execute_case_into_run(case, run_id: int) -> dict:
         str(step.get("action") or "").lower() in ("request", "api_request")
         for step in steps
     )
+    is_manual = getattr(case, "kind", "automated") == "manual"
 
-    if not steps:
+    if is_manual:
+        status = "skipped"
+        log_lines.append("manual case skipped (not auto-executable)")
+    elif not steps:
         status = "skipped"
         log_lines.append("no steps to execute")
     elif is_api:
@@ -377,7 +381,7 @@ def _run_api_assertions(
 
         if a_type == "status_equals":
             actual = first.get("status_code")
-            passed = actual == expected
+            passed = actual == expected or str(actual) == str(expected)
         elif a_type in ("json_field", "json_equals"):
             path = assertion.get("path", "")
             actual = _json_path_get(first.get("body"), path)

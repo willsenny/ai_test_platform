@@ -14,6 +14,15 @@ class TestCase(models.Model):
         P1 = "P1", "P1 - 主要功能"
         P2 = "P2", "P2 - 次要/边界"
 
+    class Kind(models.TextChoices):
+        MANUAL = "manual", "手动用例"
+        AUTOMATED = "automated", "自动化用例"
+
+    class TestType(models.TextChoices):
+        FUNCTIONAL = "functional", "功能"
+        UI = "ui", "UI"
+        API = "api", "接口"
+
     project = models.ForeignKey(
         "core.Project",
         null=True,
@@ -33,6 +42,24 @@ class TestCase(models.Model):
     )
     tags = models.JSONField(default=list, blank=True)
     source = models.CharField(max_length=200, blank=True, default="")
+
+    # Phase J：手动/自动化分类 + 需求场景追溯
+    kind = models.CharField(
+        max_length=20, choices=Kind.choices, default=Kind.AUTOMATED
+    )
+    test_type = models.CharField(
+        max_length=20, choices=TestType.choices, default=TestType.UI
+    )
+    module = models.CharField(max_length=200, blank=True, default="")
+    scenario = models.ForeignKey(
+        "core.Scenario",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="testcases",
+    )
+    manual_steps = models.JSONField(default=list, blank=True)
+    expected_result = models.TextField(blank=True, default="")
 
     # Phase D：结构化执行 + 最近一次执行结果
     target_url = models.CharField(max_length=500, blank=True, default="")

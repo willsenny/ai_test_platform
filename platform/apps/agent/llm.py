@@ -10,13 +10,29 @@ from typing import Optional, Type, Any
 from .router import ModelConfig, get_cost_tracker
 
 
+def _reasoning_kwargs(config: ModelConfig) -> dict:
+    """DeepSeek V4.1 Flash：low 关闭 thinking，high 打开并指定档位。
+
+    thinking 开启时 reasoning token 会占用 max_tokens，低档结构化生成必须关闭，
+    否则可能出现 content 为空（finish_reason=length）。
+    """
+    if "deepseek" not in (config.base_url or "").lower():
+        return {}
+    if config.reasoning_effort:
+        return {
+            "reasoning_effort": config.reasoning_effort,
+            "extra_body": {"thinking": {"type": "enabled"}},
+        }
+    return {"extra_body": {"thinking": {"type": "disabled"}}}
+
+
 async def call_llm(
     config: ModelConfig,
     prompt: str,
     *,
     system: str = "",
     temperature: float = 0.3,
-    max_tokens: int = 4096,
+    max_tokens: int = 8192,
     response_schema: Optional[Type] = None,
 ) -> dict:
     """
@@ -56,6 +72,7 @@ async def call_llm(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
+    kwargs.update(_reasoning_kwargs(config))
 
     # 结构化输出 (DeepSeek 支持 response_format)
     if response_schema:
@@ -113,6 +130,8 @@ async def _fallback_call(config: ModelConfig, prompt: str, system: str = "") -> 
         ],
         "temperature": 0.3,
     }
+    if "deepseek" in (config.base_url or "").lower() and not config.reasoning_effort:
+        payload["thinking"] = {"type": "disabled"}
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(
