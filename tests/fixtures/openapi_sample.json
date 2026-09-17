@@ -1,0 +1,72 @@
+{
+  "openapi": "3.0.0",
+  "info": {"title": "Demo API", "version": "1.0.0"},
+  "servers": [{"url": "http://localhost:8000/api"}],
+  "paths": {
+    "/login": {
+      "post": {
+        "summary": "手机号验证码登录",
+        "operationId": "login",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/LoginRequest"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "登录成功",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/LoginResponse"}
+              }
+            }
+          },
+          "400": {"description": "参数错误"}
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "健康检查",
+        "tags": ["system"],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {"status": {"type": "string", "example": "UP"}}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "LoginRequest": {
+        "type": "object",
+        "required": ["phone", "code"],
+        "properties": {
+          "phone": {"type": "string", "example": "13800138000"},
+          "code": {"type": "string", "maxLength": 6, "example": "123456"}
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "properties": {
+          "code": {"type": "integer", "example": 0},
+          "message": {"type": "string", "example": "登录成功"},
+          "token": {"type": "string"}
+        }
+      }
+    }
+  }
+}

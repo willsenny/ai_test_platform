@@ -59,7 +59,15 @@ class Command(BaseCommand):
                 return bool(automation.get(key))
             return scenario.get("type") == key
 
-        need_api = any(_wants(s, "api") for s in scenarios)
+        swagger_url = project.swagger_url if project else ""
+        if not swagger_url:
+            for scenario in scenarios:
+                candidate = (scenario.get("env") or {}).get("swagger")
+                if candidate:
+                    swagger_url = candidate
+                    break
+
+        need_api = any(_wants(s, "api") for s in scenarios) or bool(swagger_url)
         need_ui = any(_wants(s, "ui") for s in scenarios)
         if project is not None:
             if need_api and not api_base_url and not project.api_base_url:
@@ -70,6 +78,19 @@ class Command(BaseCommand):
 
                 ui_target_url = default_ui_target()
                 self.stdout.write(f"    [ui-fixture] {ui_target_url}")
+
+        # 离线演示：mock 同时提供公开 spec
+        if server is not None:
+            swagger_url = f"{api_base_url}/v3/api-docs"
+            self.stdout.write(f"    [swagger-fixture] {swagger_url}")
+
+        # ---- Swagger 导入（公开 spec，best-effort）----
+        if swagger_url:
+            from apps.core.services.swagger_service import import_swagger_for_doc
+
+            base = api_base_url or (project.api_base_url if project else "")
+            count = import_swagger_for_doc(doc, swagger_url, base_url=base)
+            self.stdout.write(f"    [swagger] {swagger_url} -> {count} 个接口场景")
 
         try:
             # ---- [2-5] 生成 → 执行 → 自愈 ----

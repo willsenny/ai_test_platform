@@ -76,9 +76,11 @@ def _save_scenarios(doc: RequirementDoc, scenarios: list[dict]) -> int:
             definition_of_done=list(scenario.get("definition_of_done") or []),
             automation=dict(scenario.get("automation") or {}),
             api_ref=scenario.get("api_ref", ""),
+            api_spec=dict(scenario.get("api") or {}),
             env=dict(scenario.get("env") or {}),
             tags=list(scenario.get("tags") or []),
             raw_text=scenario.get("raw_text", ""),
+            source=scenario.get("source", "story"),
         )
         for scenario in scenarios
     ]

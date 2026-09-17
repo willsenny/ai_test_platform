@@ -27,9 +27,9 @@ class RequirementDocAdmin(admin.ModelAdmin):
 class ScenarioAdmin(admin.ModelAdmin):
     list_display = (
         "id", "story_key", "title", "project", "module",
-        "priority", "sprint", "created_at",
+        "priority", "source", "sprint", "created_at",
     )
-    list_filter = ("priority", "project", "sprint", "module")
+    list_filter = ("priority", "project", "sprint", "module", "source")
     search_fields = ("story_key", "title", "module")
     readonly_fields = ("acceptance", "test_data", "business_rules", "raw_text")
 

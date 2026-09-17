@@ -364,4 +364,19 @@ Scenario: 正常登录
 - **关键修复**：DeepSeek Flash 默认 thinking 会耗尽 `max_tokens` 导致 content 为空 → low 档 `thinking=disabled`、high 档 `thinking=enabled` + `reasoning_effort`；`status_equals` 断言 int/str 兼容。
 - `executor` 跳过手动用例；`mock_api.py` 实现登录业务规则（空值/格式/错误码）。
 - 验证：Story 文档 → 37 用例（22 手动 / 2 UI / 13 接口），`LLMCall` 12 条（成本入库，约 $0.01）；`pytest` 68 passed；`process_doc` 6/15 自动化通过（其余为 mock 与 LLM 期望差异，待 Step 3 Swagger / Step 4 页面上下文提升）。
-- **未完成**：Step 3 Swagger、Step 4 页面感知 UI 生成、Step 5 导出、Step 6 自愈增强、Step 7 审核界面。
+### Step 3 ✅（完成）
+- `apps/core/parsers/openapi_parser.py`：`fetch_spec`（公开 spec，JSON/YAML）、`resolve_refs`（`$ref`）、`parse_endpoints`、`endpoints_to_scenarios`（每 endpoint 生成 正常 / 缺参异常 / 边界 场景；断言 `status_equals` + `json_schema` + `json_field`；请求体从 schema 示例生成）。
+- `apps/core/services/swagger_service.py`：`import_swagger_for_doc` 拉取 → 落库 `Scenario(source=swagger)`（best-effort，失败不阻断）。
+- `Scenario` 新增 `api_spec` / `source`（迁移 `core.0005`）。
+- 生成：`generation._api_cases_from_spec` 对 Swagger 场景确定性生成接口用例（不调 LLM）；executor 新增 `json_schema` 断言（jsonschema）。
+- `process_doc`：自动识别 `project.swagger_url` / 场景 `env.swagger`；离线演示时 mock 同时提供 `/v3/api-docs` 公开 spec。
+- `mock_api` 支持 /login、/health、/v3/api-docs。
+- 验证：`openapi_sample.json` → 4 个接口场景；`process_doc` 批次 #7：total=6 场景（2 Story + 4 Swagger），生成 38 用例，Swagger 用例 **4/4 通过**（含 json_schema）；`pytest` 76 passed。
+
+### Step 4（下一步，含 RAG 接入）
+- 页面感知 UI 生成（目标页 accessibility snapshot 注入 prompt）+ 弹性定位器。
+- **RAG 接入生成**：把 `planner.retrieved_cases`（历史相似用例）与 `rag.service.retrieve`（`test_knowledge` 的 PRD/接口规范）注入 manual/UI/API prompt；`RAG_EMBEDDER=bge` 切真实 embedding；`RAG_ENABLED=0` 降级。
+- `playwright_server` 动作扩展（select/check/hover/press/wait_for）+ 失败截图。
+
+### 未完成
+- Phase J Step 4 页面感知 UI + RAG 接入、Step 5 归档导出、Step 6 自愈增强、Step 7 审核界面。

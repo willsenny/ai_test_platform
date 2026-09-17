@@ -7,10 +7,24 @@
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 _FIXTURES = {
     "/api/login": (200, {"code": 0, "message": "ok", "token": "demo-token"}),
 }
+
+# 离线演示用 OpenAPI spec（/v3/api-docs）
+_SPEC_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "tests" / "fixtures" / "openapi_sample.json"
+)
+
+
+def _load_spec() -> dict:
+    try:
+        return json.loads(_SPEC_PATH.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {"openapi": "3.0.0", "info": {"title": "empty", "version": "0"}, "paths": {}}
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -47,7 +61,7 @@ class _Handler(BaseHTTPRequestHandler):
     @staticmethod
     def _respond(path: str, body: dict) -> tuple[int, dict]:
         """登录接口业务规则（与 Story 一致），其余路径回退固定夹具。"""
-        if path == "/api/login":
+        if path in ("/login", "/api/login"):
             phone = str(body.get("phone") or "").strip()
             code = str(body.get("code") or "").strip()
             if not phone:
@@ -59,6 +73,10 @@ class _Handler(BaseHTTPRequestHandler):
             if code != "123456":
                 return 400, {"code": 400, "message": "验证码错误"}
             return 200, {"code": 0, "message": "登录成功", "token": "demo-token"}
+        if path in ("/health", "/api/health"):
+            return 200, {"status": "UP"}
+        if path in ("/v3/api-docs", "/openapi.json"):
+            return 200, _load_spec()
         return _FIXTURES.get(path, (404, {"code": 404, "message": "not found"}))
 
     def log_message(self, *args):  # noqa: A003 - silence

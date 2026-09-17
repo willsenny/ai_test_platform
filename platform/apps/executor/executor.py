@@ -394,6 +394,17 @@ def _run_api_assertions(
             path = assertion.get("path", "")
             actual = _json_path_get(first.get("body"), path)
             passed = actual is not None
+        elif a_type == "json_schema":
+            schema = assertion.get("schema") or {}
+            actual = _short(first.get("body"))
+            try:
+                import jsonschema
+
+                jsonschema.validate(instance=first.get("body"), schema=schema)
+                passed = True
+            except Exception as exc:  # noqa: BLE001
+                passed = False
+                error = f"{type(exc).__name__}: {str(exc)[:200]}"
         else:
             rows.append(_step_row(
                 case.pk, run_id, row_index, "assert", a_type, "", "", "",

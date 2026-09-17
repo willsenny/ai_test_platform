@@ -172,13 +172,62 @@ async def generate_for_scenario(
             prompts.UI_SYSTEM, project_pk, scenario_id, module, ui_target=target,
         )
     if automation["api"]:
-        base = api_base_url or scenario.get("env", {}).get("api", "")
-        cases += await _generate(
-            "api", scenario, prompts.build_api_prompt(scenario, base),
-            prompts.API_SYSTEM, project_pk, scenario_id, module, api_base=base,
-        )
+        if scenario.get("api"):
+            cases += _api_cases_from_spec(scenario, api_base_url)
+        else:
+            base = api_base_url or scenario.get("env", {}).get("api", "")
+            cases += await _generate(
+                "api", scenario, prompts.build_api_prompt(scenario, base),
+                prompts.API_SYSTEM, project_pk, scenario_id, module, api_base=base,
+            )
 
     return dedup(cases)
+
+
+def resolve_url(path: str, base: str) -> str:
+    if not path:
+        return path
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
+    if base:
+        return base.rstrip("/") + (path if path.startswith("/") else f"/{path}")
+    return path
+
+
+def _api_cases_from_spec(scenario: dict, api_base_url: str = "") -> list[dict]:
+    """Swagger 派生的确定性接口用例（不调用 LLM）。"""
+    api = scenario.get("api") or {}
+    base = api_base_url or scenario.get("env", {}).get("api", "")
+    url = resolve_url(api.get("path", ""), base)
+    assertions = api.get("assertions") or [
+        {"type": "status_equals", "expected": api.get("expected_status", 200)}
+    ]
+    step = {
+        "action": "request",
+        "method": (api.get("method") or "GET").upper(),
+        "url": url,
+        "headers": api.get("headers") or {},
+        "body": api.get("body") or {},
+        "params": api.get("params") or {},
+        "description": scenario.get("title", ""),
+    }
+    return [
+        {
+            "kind": "automated",
+            "test_type": "api",
+            "title": scenario.get("title", ""),
+            "preconditions": [],
+            "steps": [step],
+            "assertions": assertions,
+            "priority": scenario.get("priority", "P1"),
+            "tags": list(dict.fromkeys(scenario.get("tags") or [])),
+            "module": scenario.get("module", ""),
+            "scenario_id": scenario.get("scenario_id"),
+            "manual_steps": [],
+            "expected_result": "",
+            "target_url": url,
+        }
+    ]
 
 
 async def _generate(

@@ -61,9 +61,11 @@ def scenario_to_dict(scenario) -> dict:
         "definition_of_done": list(scenario.definition_of_done or []),
         "automation": dict(scenario.automation or {}),
         "api_ref": scenario.api_ref,
+        "api": dict(scenario.api_spec or {}),
         "env": dict(scenario.env or {}),
         "tags": list(scenario.tags or []),
         "raw_text": scenario.raw_text,
+        "source": scenario.source,
         "description": "\n".join(description_parts),
         "acceptance_criteria": criteria,
     }

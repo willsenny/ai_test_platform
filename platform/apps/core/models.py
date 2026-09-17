@@ -114,9 +114,11 @@ class Scenario(models.Model):
     definition_of_done = models.JSONField(default=list, blank=True)
     automation = models.JSONField(default=dict, blank=True)
     api_ref = models.CharField(max_length=300, blank=True, default="")
+    api_spec = models.JSONField(default=dict, blank=True)
     env = models.JSONField(default=dict, blank=True)
     tags = models.JSONField(default=list, blank=True)
     raw_text = models.TextField(blank=True, default="")
+    source = models.CharField(max_length=20, blank=True, default="story")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
