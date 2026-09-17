@@ -18,7 +18,7 @@
         <ul class="list-unstyled small">
           {% for doc in project.requirements.all %}
           <li>
-            #{{ doc.id }} {{ doc.title }}
+            <a href="{% url 'web-doc-detail' doc.id %}">#{{ doc.id }} {{ doc.title }}</a>
             <span class="badge text-bg-secondary">{{ doc.get_status_display }}</span>
             <span class="text-muted">场景 {{ doc.scenario_count }}</span>
           </li>

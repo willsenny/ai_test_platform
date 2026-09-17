@@ -402,5 +402,15 @@ Scenario: 正常登录
 - **指标**：`manage.py heal_stats` 打印 (失败模式→策略) 成功率。
 - 验证：脚本 → UI `#code_old`→`#code`（selector_remap，healed）、API `json_field` expected `1`→`0`（assertion_refresh，rerun pass）；`locator_history` 写入并检索命中（score 0.77）；`SelfHealLog` 增长；`pytest` 103 passed。
 
-### 未完成
-- Phase J Step 7 审核界面（Scenario 审核/编辑、用例分栏、触发运行）。
+### Step 7 ✅（完成，M1 收官）
+- `DocDetailView`（`/docs/<id>/`）：需求文档 → 场景列表（Story/类型/优先级/自动化/来源）+ 编辑入口 + 批次列表。
+- `ScenarioEditView`（`/scenarios/<id>/edit/`）：审核/编辑标题、模块、优先级、标签、自动化形态、业务规则、测试数据。
+- `BatchDetailView` 增强：用例**手动/自动化分栏**（`?kind=`）、`重新运行（含自愈）` 按钮、失败步骤、`SelfHealLog` 经验表、导出按钮。
+- `BatchRunView`（`POST /batches/<id>/run/`）：后台线程重跑自动化用例并自动自愈。
+- `projects.html` 文档跳转详情；新增 `doc_detail.html` / `scenario_edit.html`。
+- 验证：`/`、`/docs/4/`、`/scenarios/15/edit/`、`/batches/8/?kind=manual|automated` 均 200；编辑 POST 落库（priority/tags/rules/test_data/automation）；`/batches/8/run/` 302；`pytest` 103 passed；`check` 无错。
+
+## Phase J 状态：M1 完成 ✅
+需求文档（Jira Story）→ 解析场景 → AI 生成 手动/UI/接口 用例 → 执行 → 失败自愈 → 归档导出 → Web 审核运行，全链路打通。
+- 下一步（M2）：内网站点探索生成 + 简单登录认证；真实站点替换本地 fixture。
+- 下一步（M3）：服务器 + CICD（Celery/SSE/定时回归/通知/权限）。

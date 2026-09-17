@@ -1,0 +1,56 @@
+{% extends "core/base.html" %}
+{% block title %}{{ doc.title }}{% endblock %}
+{% block content %}
+<h1 class="h4 mb-2">{{ doc.title }}
+  <span class="badge text-bg-secondary">{{ doc.get_status_display }}</span>
+</h1>
+<p class="text-muted">
+  项目：{{ doc.project.name }} &nbsp;|&nbsp;
+  文件：{{ doc.file.name }} &nbsp;|&nbsp;
+  场景：{{ scenarios|length }}
+</p>
+{% if doc.error_message %}<div class="alert alert-warning">{{ doc.error_message }}</div>{% endif %}
+
+<h2 class="h6 mt-4">需求场景（审核 / 编辑）</h2>
+<table class="table table-sm bg-white align-middle">
+  <thead>
+    <tr>
+      <th>#</th><th>Story</th><th>标题</th><th>模块</th>
+      <th>类型</th><th>优先级</th><th>自动化</th><th>来源</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in scenarios %}
+    <tr>
+      <td>{{ s.id }}</td>
+      <td>{{ s.story_key|default:"-" }}</td>
+      <td>{{ s.title }}</td>
+      <td>{{ s.module|default:"-" }}</td>
+      <td>{{ s.test_types|join:", " }}</td>
+      <td>{{ s.priority }}</td>
+      <td>
+        {% if s.automation.manual %}<span class="badge text-bg-light">手动</span>{% endif %}
+        {% if s.automation.ui %}<span class="badge text-bg-info">UI</span>{% endif %}
+        {% if s.automation.api %}<span class="badge text-bg-success">API</span>{% endif %}
+      </td>
+      <td class="text-muted small">{{ s.source }}</td>
+      <td><a class="btn btn-sm btn-outline-secondary" href="{% url 'web-scenario-edit' s.id %}">编辑</a></td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="9" class="text-muted">暂无场景</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2 class="h6 mt-4">生成批次</h2>
+<ul>
+  {% for b in batches %}
+  <li><a href="{% url 'web-batch-detail' b.pk %}">批次 #{{ b.pk }}</a>
+    <span class="badge text-bg-secondary">{{ b.get_status_display }}</span>
+    <span class="text-muted">{{ b.generated }} 用例 · {{ b.healed }} 自愈</span>
+  </li>
+  {% empty %}
+  <li class="text-muted">暂无</li>
+  {% endfor %}
+</ul>
+{% endblock %}

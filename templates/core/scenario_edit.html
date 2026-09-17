@@ -1,0 +1,57 @@
+{% extends "core/base.html" %}
+{% block title %}编辑场景 #{{ scenario.pk }}{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3">编辑场景 #{{ scenario.pk }}</h1>
+<form method="post" class="card card-body">
+  {% csrf_token %}
+  <div class="mb-3">
+    <label class="form-label">标题</label>
+    <input type="text" name="title" class="form-control" value="{{ scenario.title }}" />
+  </div>
+  <div class="row">
+    <div class="col-md-4 mb-3">
+      <label class="form-label">模块</label>
+      <input type="text" name="module" class="form-control" value="{{ scenario.module }}" />
+    </div>
+    <div class="col-md-4 mb-3">
+      <label class="form-label">优先级</label>
+      <select name="priority" class="form-select">
+        <option value="P0" {% if scenario.priority == "P0" %}selected{% endif %}>P0</option>
+        <option value="P1" {% if scenario.priority == "P1" %}selected{% endif %}>P1</option>
+        <option value="P2" {% if scenario.priority == "P2" %}selected{% endif %}>P2</option>
+      </select>
+    </div>
+    <div class="col-md-4 mb-3">
+      <label class="form-label">标签（逗号分隔）</label>
+      <input type="text" name="tags" class="form-control" value="{{ scenario.tags|join:', ' }}" />
+    </div>
+  </div>
+  <div class="mb-3">
+    <label class="form-label d-block">自动化形态</label>
+    <div class="form-check form-check-inline">
+      <input class="form-check-input" type="checkbox" name="auto_manual" {% if scenario.automation.manual %}checked{% endif %} />
+      <label class="form-check-label">手动</label>
+    </div>
+    <div class="form-check form-check-inline">
+      <input class="form-check-input" type="checkbox" name="auto_ui" {% if scenario.automation.ui %}checked{% endif %} />
+      <label class="form-check-label">UI</label>
+    </div>
+    <div class="form-check form-check-inline">
+      <input class="form-check-input" type="checkbox" name="auto_api" {% if scenario.automation.api %}checked{% endif %} />
+      <label class="form-check-label">API</label>
+    </div>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">业务规则（每行一条）</label>
+    <textarea name="business_rules" class="form-control" rows="3">{{ scenario.business_rules|join:"\n" }}</textarea>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">测试数据（JSON）</label>
+    <textarea name="test_data" class="form-control" rows="3">{{ test_data_json }}</textarea>
+  </div>
+  <div>
+    <button class="btn btn-primary" type="submit">保存</button>
+    <a class="btn btn-outline-secondary" href="{% url 'web-doc-detail' scenario.doc_id %}">返回</a>
+  </div>
+</form>
+{% endblock %}

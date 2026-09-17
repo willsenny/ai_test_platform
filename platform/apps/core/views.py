@@ -12,6 +12,8 @@ Web:
     GET  /batches/{id}/report/ 执行报告
 """
 import asyncio
+import json
+import re
 import threading
 from pathlib import Path
 
@@ -21,7 +23,7 @@ from django.views import View
 from django.views.generic import DetailView, ListView
 from rest_framework import viewsets
 
-from .models import Project, RequirementDoc, TestGenerationBatch
+from .models import Project, RequirementDoc, Scenario, TestGenerationBatch
 from .serializers import ProjectSerializer
 from .services.doc_service import parse_doc
 
@@ -102,6 +104,118 @@ class DocUploadView(View):
         return redirect("web-projects")
 
 
+def _start_rerun(batch_id: int) -> None:
+    """后台线程重新执行批次中的自动化用例（含自愈）。"""
+    def target():
+        from django.db import close_old_connections
+
+        close_old_connections()
+        try:
+            from apps.executor.executor import execute_cases
+            from apps.testcases.models import TestCase
+
+            batch = TestGenerationBatch.objects.select_related("project").get(pk=batch_id)
+            case_ids = list(
+                TestCase.objects.filter(
+                    id__in=batch.case_ids or [], kind=TestCase.Kind.AUTOMATED
+                ).values_list("id", flat=True)
+            )
+            if case_ids:
+                result = asyncio.run(
+                    execute_cases(
+                        case_ids,
+                        goal=batch.doc.title or f"batch#{batch.pk}",
+                        source="web:rerun",
+                        project_id=batch.project.key,
+                        auto_heal=True,
+                    )
+                )
+                TestGenerationBatch.objects.filter(pk=batch_id).update(
+                    run_id=result.get("run_id"),
+                    executed=result.get("total", 0),
+                    healed=result.get("healed", 0),
+                    status=TestGenerationBatch.Status.DONE,
+                )
+        except Exception:  # noqa: BLE001
+            import logging
+
+            logging.getLogger(__name__).exception("rerun failed")
+        finally:
+            close_old_connections()
+
+    threading.Thread(target=target, daemon=True).start()
+
+
+class DocDetailView(DetailView):
+    template_name = "core/doc_detail.html"
+    context_object_name = "doc"
+    queryset = RequirementDoc.objects.select_related("project")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["scenarios"] = self.object.scenarios.all()
+        context["batches"] = self.object.batches.all()
+        return context
+
+
+def _split_list(value: str) -> list[str]:
+    return [t.strip() for t in re.split(r"[,，、\s]+", value or "") if t.strip()]
+
+
+def _split_lines(value: str) -> list[str]:
+    return [line.strip(" -") for line in (value or "").splitlines() if line.strip()]
+
+
+def _parse_json_dict(value: str) -> dict:
+    try:
+        data = json.loads(value or "{}")
+        return data if isinstance(data, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+class ScenarioEditView(View):
+    """审核 / 编辑单个需求场景。"""
+
+    template_name = "core/scenario_edit.html"
+
+    def get(self, request, pk):
+        scenario = get_object_or_404(Scenario, pk=pk)
+        return render(
+            request,
+            self.template_name,
+            {
+                "scenario": scenario,
+                "test_data_json": json.dumps(scenario.test_data or {}, ensure_ascii=False, indent=2),
+            },
+        )
+
+    def post(self, request, pk):
+        scenario = get_object_or_404(Scenario, pk=pk)
+        scenario.title = request.POST.get("title", "").strip() or scenario.title
+        scenario.priority = request.POST.get("priority") or scenario.priority
+        scenario.module = request.POST.get("module", "")
+        scenario.tags = _split_list(request.POST.get("tags", ""))
+        scenario.business_rules = _split_lines(request.POST.get("business_rules", ""))
+        scenario.test_data = _parse_json_dict(request.POST.get("test_data", "{}"))
+        scenario.automation = {
+            "manual": request.POST.get("auto_manual") == "on",
+            "ui": request.POST.get("auto_ui") == "on",
+            "api": request.POST.get("auto_api") == "on",
+        }
+        scenario.save()
+        return redirect("web-doc-detail", pk=scenario.doc_id)
+
+
+class BatchRunView(View):
+    """触发批次重新执行（含自愈）。"""
+
+    def post(self, request, pk):
+        batch = get_object_or_404(TestGenerationBatch, pk=pk)
+        _start_rerun(batch.pk)
+        return redirect("web-batch-detail", pk=batch.pk)
+
+
 class BatchDetailView(DetailView):
     template_name = "core/batch_detail.html"
     context_object_name = "batch"
@@ -112,11 +226,27 @@ class BatchDetailView(DetailView):
         batch = self.object
         from apps.testcases.models import TestCase
 
-        context["cases"] = TestCase.objects.filter(id__in=batch.case_ids or [])
+        cases = TestCase.objects.filter(id__in=batch.case_ids or [])
+        kind = self.request.GET.get("kind", "")
+        if kind in ("manual", "automated"):
+            cases = cases.filter(kind=kind)
+        context["cases"] = cases
+        context["kind"] = kind
+        context["manual_total"] = TestCase.objects.filter(
+            id__in=batch.case_ids or [], kind=TestCase.Kind.MANUAL
+        ).count()
+        context["automated_total"] = TestCase.objects.filter(
+            id__in=batch.case_ids or [], kind=TestCase.Kind.AUTOMATED
+        ).count()
+
         if batch.run_id:
             context["failed_steps"] = batch.run.step_results.filter(
                 status__in=["fail", "error"]
             ).select_related("testcase")
+
+        from apps.selfheal.models import SelfHealLog
+
+        context["heal_logs"] = SelfHealLog.objects.all()[:10]
         return context
 
 

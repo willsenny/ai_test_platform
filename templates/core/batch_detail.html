@@ -22,10 +22,14 @@
   <div class="col"><div class="card card-body"><div class="h4 text-success">{{ batch.healed }}</div><small>自愈</small></div></div>
 </div>
 
-<div class="mb-3">
+<div class="mb-3 d-flex gap-2">
   <a class="btn btn-sm btn-outline-primary" href="{% url 'web-batch-export' batch.pk 'xlsx' %}">导出手动用例 Excel</a>
   <a class="btn btn-sm btn-outline-primary" href="{% url 'web-batch-export' batch.pk 'pytest' %}">导出自动化 pytest 工程</a>
   <a class="btn btn-sm btn-outline-primary" href="{% url 'web-batch-export' batch.pk 'json' %}">导出 JSON 存档</a>
+  <form method="post" action="{% url 'web-batch-run' batch.pk %}" class="d-inline">
+    {% csrf_token %}
+    <button class="btn btn-sm btn-warning" type="submit">重新运行（含自愈）</button>
+  </form>
 </div>
 
 {% if batch.error_message %}
@@ -45,19 +49,25 @@
 {% endif %}
 
 <h2 class="h6 mt-4">生成的用例</h2>
+<ul class="nav nav-pills mb-2">
+  <li class="nav-item"><a class="nav-link {% if not kind %}active{% endif %}" href="?">全部</a></li>
+  <li class="nav-item"><a class="nav-link {% if kind == 'manual' %}active{% endif %}" href="?kind=manual">手动 ({{ manual_total }})</a></li>
+  <li class="nav-item"><a class="nav-link {% if kind == 'automated' %}active{% endif %}" href="?kind=automated">自动化 ({{ automated_total }})</a></li>
+</ul>
 <table class="table table-sm bg-white">
-  <thead><tr><th>#</th><th>标题</th><th>优先级</th><th>最近状态</th><th>来源</th></tr></thead>
+  <thead><tr><th>#</th><th>类型</th><th>标题</th><th>优先级</th><th>最近状态</th><th>来源</th></tr></thead>
   <tbody>
     {% for case in cases %}
     <tr>
       <td>{{ case.id }}</td>
+      <td>{{ case.kind }}/{{ case.test_type }}</td>
       <td>{{ case.title }}</td>
       <td>{{ case.priority }}</td>
       <td>{{ case.last_run_status|default:"-" }}</td>
       <td class="text-muted small">{{ case.source }}</td>
     </tr>
     {% empty %}
-    <tr><td colspan="5" class="text-muted">生成中…</td></tr>
+    <tr><td colspan="6" class="text-muted">生成中…</td></tr>
     {% endfor %}
   </tbody>
 </table>
@@ -74,6 +84,23 @@
       <td>{{ step.action }}</td>
       <td><code>{{ step.selector }}</code></td>
       <td class="text-danger small">{{ step.error }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if heal_logs %}
+<h2 class="h6 mt-4">自愈经验（SelfHealLog）</h2>
+<table class="table table-sm bg-white">
+  <thead><tr><th>失败模式</th><th>修复策略</th><th>成功/尝试</th><th>最近详情</th></tr></thead>
+  <tbody>
+    {% for log in heal_logs %}
+    <tr>
+      <td>{{ log.failure_pattern }}</td>
+      <td>{{ log.fix_strategy }}</td>
+      <td>{{ log.success_count }}/{{ log.attempt_count }}</td>
+      <td class="text-muted small">{{ log.last_detail|truncatechars:80 }}</td>
     </tr>
     {% endfor %}
   </tbody>

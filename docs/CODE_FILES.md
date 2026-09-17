@@ -2,42 +2,49 @@
 
 > 适用范围：本仓库全部源代码文件。
 > 目的：说明每个文件的职责、关键符号、依赖关系与改动注意事项，便于人工审核与二次开发。
-> 维护约定：新增/删除文件时请同步更新本文档；"阶段"标注对应 `plan.md` 中的 Phase C–G。
+> 维护约定：新增/删除文件时请同步更新本文档；"阶段"标注对应 `plan.md` 中的 Phase C–J。
 
 ---
 
 ## 0. 总览与数据流
 
+**Phase I/J 主链路（需求文档 → 用例 → 执行 → 自愈 → 导出）**：
+
 ```
-需求文本
-  │
+Jira Story / Markdown 文档
+  │  core.parsers（markdown_parser / story_parser / openapi_parser）
   ▼
-[Django] apps/agent/graph.py  ── planner ──▶ [RAG] apps/rag/retriever.py（检索历史用例）
-  │                                     │
-  │                                     ▼
-  │                             generator（MCP echo: fake_generate_test，注入 few-shot）
-  │                                     │
-  │                                     ▼
-  │                             reporter（写 apps/testcases/TestCase）
-  │                                     │
-  │                                     ▼
-  │                             executor（apps/executor/executor.py + Playwright MCP）
-  │                                     │
-  │                          失败 ──────┴────── 通过 → finalize
-  │                           │
-  │                           ▼
-  │                    healer（apps/selfheal/engine.py：analyzer → fixer → 重跑 → learner）
-  │                           │
-  │                           ▼
-  └───────────────── 经验写 SelfHealLog + 向量化到 Qdrant
+RequirementDoc + Scenario（core.models）
+  │  core.services.doc_service.parse_doc / swagger_service.import_swagger_for_doc
+  ▼
+core.services.generation_service.generate_from_doc
+  │   ├─ planner（agent.graph）: RAG 检索历史用例 + 知识库
+  │   ├─ generator（agent.generation）: LLM 生成 手动 / UI / 接口 用例（注入 few-shot + 页面快照）
+  │   └─ reporter（agent.graph）: 写 testcases.TestCase（kind/test_type/scenario）
+  ▼
+executor.execute_cases(auto_heal=True)（Playwright MCP / api_server MCP）
+  │   └─ 失败 → selfheal.engine.run（analyzer → fixer → 重跑 → learner）
+  ▼
+TestGenerationBatch 计数 + TestRun JSON/HTML 报告
+  │  core.services.export_service（xlsx / pytest zip / json）
+  ▼
+core.views Web（上传 / 场景审核 / 批次分栏 / 运行 / 报告 / 导出）
 ```
 
-**RAG（Phase G）三条向量流**：
-- `TestCase` 保存 → `rag/indexer.index_testcase` → collection `testcases`
-- `TestStepResult` 失败 → `rag/indexer.index_failure` → collection `step_results`
-- `SelfHealLog` 保存 → `rag/indexer.index_heal_log` → collection `heal_logs`
+**Phase C–G legacy 链路**（仍在仓库中，供参考/兼容）：
 
-**技术栈**：Django + DRF、LangGraph、qdrant-client、MCP Python SDK（stdio/SSE）、Playwright、PostgreSQL。
+```
+需求文本 → agent.graph.build_demo_graph（planner→generator(echo MCP)→reporter→executor→healer）
+```
+
+**RAG 向量流**（Phase G + J）：
+- `TestCase` 保存 → `rag/indexer.index_testcase` → collection `testcases`
+- `TestStepResult` 失败 → `index_failure` → `step_results`
+- `SelfHealLog` 保存 → `index_heal_log` → `heal_logs`
+- 定位器修复成功 → `index_locator` → `locator_history`
+- 知识库（PRD/接口规范）→ `test_knowledge`（读取通过 `retrieve_knowledge`）
+
+**技术栈**：Django + DRF、LangGraph、DeepSeek Flash（litellm）、qdrant-client、MCP Python SDK（stdio/SSE）、Playwright、PostgreSQL、openpyxl、jsonschema。
 
 ---
 
@@ -45,15 +52,15 @@
 
 | 文件 | 作用 | 备注 |
 |---|---|---|
-| `README.md` | 项目介绍、目录结构、快速开始 | 需与实现同步 |
+| `README.md` | 项目介绍、实现状态、目录结构、快速开始、Phase I/J 使用 | 需与实现同步 |
 | `QUICKSTART.md` | 更详细的启动 / API 调用示例 | 含 RAG `/retrieve` 示例 |
-| `plan.md` | 各阶段执行计划、环境偏差、验证记录 | Phase C–G 历史，改动决策来源 |
-| `.env.example` | 环境变量模板（模型、DB、Qdrant、Embedding、RAG） | 复制为 `platform/.env` 使用 |
-| `.gitignore` | 忽略 `.env`、venv、`media/`、`.qdrant_local/`、`qdrant_data/` 等 | 勿把 `.env` / 索引数据入库 |
-| `docker-compose.yml` | Qdrant + PostgreSQL + Redis 编排 | 本机无 Docker 时用本地嵌入式 Qdrant 兜底 |
+| `plan.md` | 各阶段执行计划、环境偏差、验证记录、Phase J 实施进展 | 改动决策来源 |
+| `docs/CODE_FILES.md` | 本文档 | — |
+| `.env.example` | 环境变量模板（模型、DB、Qdrant、Embedding、RAG） | 复制为 `platform/.env` |
+| `.gitignore` | 忽略 `.env`、venv、`media/`、`.qdrant_local/` 等 | 勿把密钥/索引数据入库 |
+| `docker-compose.yml` | Qdrant + PostgreSQL + Redis 编排 | 无 Docker 时本地嵌入式 Qdrant 兜底 |
 | `pytest.ini` | pytest 配置：`pythonpath=platform`、`testpaths=tests`、`asyncio_mode=strict` | 测试从仓库根运行 |
 | `architecture.png` / `cost_comparison.png` / `self_heal_flow.png` | 由 `scripts/generate_diagrams.py` 生成的图 | 非代码 |
-| `docs/CODE_FILES.md` | 本文档 | — |
 
 ---
 
@@ -62,11 +69,11 @@
 | 文件 | 作用 |
 |---|---|
 | `opencode.json` | OpenCode 主配置：默认模型 `deepseek/deepseek-flash`，挂载官方 Playwright MCP。 |
-| `config.yaml` | 面向团队/文档的完整配置：模型列表与价格、`router` 规则（low/high 正则）、MCP server 清单、Skills、Agent 模式、成本与隐私控制。与 `apps/agent/router.py` 的 `TASK_ROUTING` 语义对齐。 |
-| `skills/test-generator/SKILL.md` | Skill 定义：需求 → RAG → LangGraph → 用例/代码/执行报告。 |
-| `skills/self-heal/SKILL.md` | Skill 定义：失败 → 五段自愈闭环 → 自动开 PR。 |
+| `config.yaml` | 团队/文档用完整配置：模型与价格、`router` 规则（low/high 正则）、MCP server 清单、Skills、Agent 模式、成本与隐私控制。与 `apps/agent/router.py::TASK_ROUTING` 语义对齐。 |
+| `skills/test-generator/SKILL.md` | Skill：需求 → RAG → LangGraph → 用例/代码/报告。 |
+| `skills/self-heal/SKILL.md` | Skill：失败 → 五段自愈闭环 → 自动开 PR。 |
 
-> 审核点：`config.yaml` 与 `router.py` 的路由规则需保持一致，否则"文档与实现漂移"。
+> 审核点：`config.yaml` 与 `router.py` 路由规则须保持一致。
 
 ---
 
@@ -74,84 +81,90 @@
 
 | 文件 | 作用 | 修改注意 |
 |---|---|---|
-| `settings.py` | 全部 Django 配置：`INSTALLED_APPS`、数据库（`DATABASE_URL`/`DB_*`）、DRF、CORS、`AGENT_CONFIG`（Flash-Only 模型/预算）、`RAG_CONFIG`（Phase G：enabled/qdrant_mode/collections/score_threshold/embedder）、`MCP_CONFIG_FILE`、`MEDIA_*`。启动时 `load_dotenv(platform/.env)`。 | 新增 app 必须登记 `INSTALLED_APPS`；改 RAG 行为优先改 `RAG_CONFIG` 或环境变量。 |
-| `urls.py` | 顶层路由：`/admin/`、`/api/schema`、`/api/docs/`，`/api/v1/` 下聚合各 app；DEBUG 下挂 `media/` 静态访问。 | 新 app 需在此 `include`。 |
-| `asgi.py` / `wsgi.py` | ASGI/WSGI 部署入口。 | 部署时 `DJANGO_SETTINGS_MODULE=config.settings`。 |
-| `__init__.py` | 包标记。 | — |
+| `settings.py` | 全部 Django 配置：`INSTALLED_APPS`、数据库、DRF、CORS、`AGENT_CONFIG`、`RAG_CONFIG`、`MCP_CONFIG_FILE`、`MEDIA_*`（报告/导出落 `media/`）；启动 `load_dotenv(platform/.env)`。 | 新增 app 必须登记 `INSTALLED_APPS`。 |
+| `urls.py` | 顶层路由：`/admin/`、`/api/schema`、`/api/docs/`、`/api/v1/` 聚合各 app；**Phase I/J 将 `apps.core.urls.web_urlpatterns` 挂到站点根**；DEBUG 下挂 `media/`。 | 新增 app 需在此 `include`。 |
+| `asgi.py` / `wsgi.py` | ASGI/WSGI 入口。 | `DJANGO_SETTINGS_MODULE=config.settings`。 |
 
 ---
 
-## 4. `platform/apps/core/`（项目管理，复用 WHartTest）
+## 4. `platform/apps/core/`（项目管理 + 产品化链路，Phase I/J 核心）
 
 | 文件 | 作用 | 关键内容 |
 |---|---|---|
-| `models.py` | `Project` 模型：`name`、`key`（唯一，用于 `project_id` 隔离）、描述、时间戳。 | 所有用例/RAG 都以 `project_id`（即 `key`）做隔离。 |
-| `serializers.py` | `ProjectSerializer`（ModelSerializer）。 | — |
-| `views.py` | `ProjectViewSet`（ModelViewSet，标准 CRUD）。 | — |
-| `urls.py` | DRF DefaultRouter，`/api/v1/projects/`。 | — |
-| `admin.py` | `ProjectAdmin` 注册。 | — |
-| `apps.py` | `CoreConfig`。 | — |
-| `migrations/0001_initial.py` | 初始建表。 | 改模型后 `makemigrations`。 |
+| `models.py` | 6 个模型：`Project`（`base_url`/`api_base_url`/`swagger_url`）、`RequirementDoc`（file/parsed_scenarios/status）、`Scenario`（story_key/epic/sprint/module/test_types/priority/story_points/role/goal/benefit/business_rules/test_data/acceptance/automation/api_ref/api_spec/env/tags/source）、`TestGenerationBatch`（total/generated/manual_count/automated_count/executed/healed/run/case_ids）、`ExportJob`、`LLMCall`。 | `Scenario.source` = `story`/`markdown`/`swagger`。 |
+| `parsers/base.py` | `BaseParser`（`parse(text)->list[dict]`、`supports(file_type)`）。 | 场景 dict 结构见 docstring。 |
+| `parsers/markdown_parser.py` | 通用 Markdown：标题层级→场景，`type: api` 启发式（HTTP 动词/API 关键词），```json 规格块，优先级/标签/验收标准。 | 被 `parser_factory` 作为默认。 |
+| `parsers/story_parser.py` | **Jira Story**：Epic/Sprint/Story 元数据、`As a/I want/So that`、业务规则、测试数据、**Gherkin AC**、DoD、automation、api_ref、env；`looks_like_story()` 文本特征。 | 由 `get_parser(type, text)` 命中。 |
+| `parsers/openapi_parser.py` | **Swagger/OpenAPI**：`fetch_spec`（公开 spec，JSON/YAML）、`resolve_refs`、`parse_endpoints`、`endpoints_to_scenarios`（正常/缺参/边界；`json_schema` 断言；请求体由 schema 示例生成）。 | 仅公开可访问 spec；`$ref` 本地解析。 |
+| `parsers/parser_factory.py` | `get_parser(file_type, sample_text=None)`、`supported_file_types()`：按类型/文本特征选 Story/Markdown。 | 不支持类型抛 `ValueError`。 |
+| `services/doc_service.py` | `parse_doc(doc_id)`：读文件 → 选解析器 → 写回 `parsed_scenarios` + 幂等重建 `Scenario` 行 + 状态。 | `_save_scenarios` 先删后建。 |
+| `services/generation_service.py` | `generate_from_doc(doc_id, ...)`：加载 Scenario → 逐场景调 `build_generation_graph` → `execute_cases(auto_heal)` → 回写批次计数；`scenario_to_dict` 注入 `scenario_id`。 | 仅自动化用例参与执行。 |
+| `services/swagger_service.py` | `import_swagger_for_doc(doc, url, base_url)`：拉取/解析/落库 `Scenario(source="swagger")`，失败不阻断。 | best-effort。 |
+| `services/export_service.py` | 归档导出：`build_xlsx`（手动用例）、`build_pytest_zip`（UI Playwright + API httpx + jsonschema）、`build_json`、`export_batch(batch_id, fmt)` 写 `ExportJob`。 | 纯渲染函数不依赖 DB，便于单测。 |
+| `mock_api.py` | 离线 API 夹具：登录业务规则（/login）、/health、`/v3/api-docs` 公开 spec；`start_mock_api()`。 | 供 `process_doc` 无外部依赖演示。 |
+| `views.py` | DRF `ProjectViewSet` + Web：`ProjectListView`/`DocUploadView`/`DocDetailView`/`ScenarioEditView`/`BatchDetailView`/`BatchRunView`/`BatchExportView`/`ReportView`；后台线程 `_start_generation`/`_start_rerun`。 | Web 视图无鉴权（单人本地）。 |
+| `urls.py` | DRF router（`/api/v1/projects/`）+ `web_urlpatterns`（站点根：`/`、`/docs/...`、`/scenarios/<id>/edit/`、`/batches/<id>/{,report,run,export}`）。 | 在 `config/urls.py` 注册。 |
+| `serializers.py` | `ProjectSerializer`（含 base/api/swagger_url）。 | — |
+| `admin.py` | 注册 Project/RequirementDoc/Scenario/TestGenerationBatch/ExportJob/LLMCall。 | — |
+| `management/commands/process_doc.py` | 一键：解析 →（Swagger 导入/离线夹具）→ 生成 → 执行 → 自愈；打印场景/batch/TestRun/报告。 | 参数 `--no-execute/--no-heal` 等。 |
+| `management/commands/export_cases.py` | `export_cases <batch_id> [--format xlsx|pytest|json|all]`。 | — |
+| `migrations/0001..0006` | 0001 Project；0002 base/api/swagger_url + RequirementDoc + TestGenerationBatch；0003 Scenario；0004 LLMCall；0005 Scenario.api_spec/source；0006 batch 计数 + ExportJob。 | 改模型需补迁移。 |
 
 ---
 
-## 5. `platform/apps/testcases/`（用例库，复用 + 扩充）
+## 5. `platform/apps/testcases/`（用例库）
 
 | 文件 | 作用 | 关键内容 |
 |---|---|---|
-| `models.py` | `TestCase` 模型：`project_id`、`title`、`preconditions`、`steps`、`assertions`、`priority`(P0/P1/P2)、`tags`、`source`、`target_url`、`raw_steps`；`last_run_*` 为 **DEPRECATED** 摘要字段（Phase E 起明细在 `executor.TestStepResult`）。 | 保存时会触发 `rag` 的 `post_save` 信号索引到 Qdrant。 |
-| `serializers.py` | `TestCaseSerializer`（暴露全部字段）。 | — |
-| `views.py` | `TestCaseViewSet`，支持 `?project_id=` 过滤。 | — |
-| `urls.py` | Router，`/api/v1/testcases/`。 | — |
-| `admin.py` | `TestCaseAdmin`（按优先级/项目/最近状态过滤）。 | — |
-| `apps.py` | `TestcasesConfig`。 | — |
-| `migrations/0001..0003` | 0001 初始；0002 加 `target_url`/`raw_steps`/`last_run_*`（Phase D）；0003 把 `last_run_*` 标注 deprecated（Phase E）。 | 手工改模型务必补迁移。 |
+| `models.py` | `TestCase`：`project`(FK)/`project_key`、title、preconditions、steps、assertions、priority、tags、source；**Phase J** `kind`(manual/automated)、`test_type`(functional/ui/api)、`module`、`scenario`(FK)、`manual_steps`、`expected_result`；`target_url`/`raw_steps`；`last_run_*` 为 DEPRECATED 摘要。 | 保存触发 `rag` 的 `post_save` 索引。 |
+| `serializers.py` | `TestCaseSerializer`：暴露 `project`，`project_id` 为 `project_key` 别名（兼容旧 API）。 | — |
+| `views.py` | `TestCaseViewSet`，支持 `?project_id=`（映射 `project_key`）。 | — |
+| `admin.py` | `TestCaseAdmin`（kind/test_type/module/project 过滤）。 | — |
+| `migrations/0001..0005` | 0002 `target_url/raw_steps/last_run_*`；0003 deprecated；**0004 加 `project` FK + `project_id`→`project_key`**；**0005 kind/test_type/module/scenario/manual_steps/expected_result**。 | — |
 
 ---
 
-## 6. `platform/apps/rag/`（RAG，Phase G 核心）
+## 6. `platform/apps/rag/`（RAG）
 
-> 注意：本 app 同时存在**旧知识库 RAG**（`service.py`，collection `test_knowledge`，带 reranker 占位）
-> 和 **Phase G 业务检索**（`embedder/retriever/indexer/signals`，三个新 collection）。二者相互独立。
+> 同时存在**旧知识库 RAG**（`service.py`，collection `test_knowledge`）与 **Phase G/J 业务检索**（`embedder/retriever/indexer/signals`），相互独立。
 
 | 文件 | 作用 | 关键符号 / 备注 |
 |---|---|---|
-| `embedder.py` | **Embedder 抽象**。`Embedder` 协议（`dimension`/`embed`/`embed_many`）；`FakeEmbedder(dim=8)` 开发用（确定性哈希词袋，共享 token 相似度更高）；`BGEEmbedder` 生产用（OpenAI 兼容 embeddings HTTP，默认 `BAAI/bge-m3`，可换 `text2vec-large-chinese`）；`get_embedder()` 按 `RAG_EMBEDDER=fake|bge` 返回单例。 | 只依赖 stdlib + httpx；改模型维度用 `EMBEDDING_DIM`。 |
-| `retriever.py` | **向量检索**。`retrieve(query, collection, top_k)` → `[{id,payload,score}]`；业务方法 `retrieve_similar_cases` / `retrieve_similar_failures` / `retrieve_heal_experience`；`aretrieve_similar_cases` 为 async 包装。`get_client()` 按 `QDRANT_MODE`（auto/remote/local/memory/off）构建客户端，**auto 默认远端不可达回退本地嵌入式**；`ensure_collection` 维度不符自动重建；所有异常返回 `[]`（降级不阻断）。collection 常量 `testcases`/`step_results`/`heal_logs`。 | 使用 `query_points`（qdrant-client ≥1.19 已移除 `search`）。`atexit` 主动关闭避免退出报错。 |
-| `indexer.py` | **向量写入**。`index_testcase/index_failure/index_heal_log` + 批量 `index_failures`；文本化函数 `testcase_text/failure_text/heal_text`；`schedule_*` 支持 `RAG_INDEX_ASYNC=1` 后台线程，`flush()` 收尾。best-effort，异常仅告警。 | point id 用数据库主键（幂等 upsert）。 |
-| `signals.py` | Django `post_save` 信号：`TestCase`→`schedule_testcase`；`TestStepResult`（失败态）→`schedule_failure`；`SelfHealLog`→`schedule_heal_log`。 | `bulk_create` 不触发信号，故 executor 另做显式索引。 |
-| `apps.py` | `RagConfig.ready()` 导入 `signals` 完成注册。 | 勿在 `ready()` 里做网络/DB 访问。 |
-| `service.py` | **旧知识库 RAG**（PRD/接口/历史缺陷入库与检索）：`Document`/`RetrievalResult`、`embed`、`rerank`、`ingest_document`、`retrieve`（`_split_text` 分块）。 | ⚠️ `retrieve` 仍调用已移除的 `client.search`，真实调用会失败；目前仅被 legacy `nodes.retrieve_node` / `scripts/*` 使用且测试中被打桩。改造/清理时注意。 |
-| `views.py` | `IngestView`、`RetrieveView`（`/api/v1/rag/ingest`、`/retrieve`）。 | — |
-| `urls.py` | RAG 路由。 | — |
-| `__init__.py` | 包标记。 | — |
+| `embedder.py` | `Embedder` 协议；`FakeEmbedder(dim=8)` 开发用；`BGEEmbedder` 生产用（OpenAI 兼容）；`get_embedder()` 按 `RAG_EMBEDDER=fake|bge`。 | 无真实模型时默认 fake。 |
+| `retriever.py` | `retrieve(query, collection, top_k)`；业务方法 `retrieve_similar_cases` / `retrieve_similar_failures` / `retrieve_heal_experience` / **`retrieve_knowledge`** / **`retrieve_locator`**；async 包装 `aretrieve_similar_cases` / `aretrieve_knowledge`。collection 常量：`testcases`/`step_results`/`heal_logs`/**`test_knowledge`**/**`locator_history`**。`QDRANT_MODE=auto` 远端不可达回退本地。 | 异常一律返回 `[]`。 |
+| `indexer.py` | `index_testcase/index_failure/index_heal_log` + **`index_locator`** + 批量 `index_failures`；`schedule_*`（`RAG_INDEX_ASYNC=1` 后台线程）+ `flush()`。 | best-effort；point id 幂等。 |
+| `signals.py` | `post_save`：TestCase→`schedule_testcase`；失败 TestStepResult→`schedule_failure`；SelfHealLog→`schedule_heal_log`。 | `bulk_create` 不触发。 |
+| `service.py` | **旧知识库**：`Document`/`RetrievalResult`、`embed`、`rerank`、`ingest_document`、`retrieve`、`_split_text`。 | ⚠️ `retrieve` 仍用已移除的 `client.search`；真实调用会失败，新功能请走 `retriever.retrieve_knowledge`。 |
+| `views.py` / `urls.py` | `IngestView` / `RetrieveView`（`/api/v1/rag/*`）。 | — |
+| `apps.py` | `RagConfig.ready()` 注册 signals。 | — |
 
 ---
 
-## 7. `platform/apps/agent/`（LangGraph 编排）
+## 7. `platform/apps/agent/`（LangGraph 编排 + LLM 生成）
 
 | 文件 | 作用 | 关键符号 / 备注 |
 |---|---|---|
-| `state.py` | `AgentState`（TypedDict）：`requirement`、`project_id`、`retrieved_context`、Phase G `retrieved_cases`/`few_shot_used`、`test_cases`、`plan`/`saved_ids`、`execute`/`execution_*`、`self_heal`/`inject_failure`/`heal_results`、`retry_budget` 等。另含旧 `TestCase` TypedDict。 | 节点返回值即状态增量；新增字段记得加类型。 |
-| `graph.py` | 两套图：<br>① `build_graph()` + `run_test_workflow()`：完整 9 节点链路（retrieve→…→self_heal），部分节点为桩。<br>② `build_demo_graph()` + `run_agent_demo_workflow()`：Phase C–G 可跑闭环。节点实现含 `planner_node`（Phase G 检索历史用例+日志）、`generator_node`（MCP echo + few-shot）、`reporter_node`、`executor_node`、`inject_failure_node`、`healer_node`；含 `_few_shot_payload`、`_save_test_cases`、`_inject_failure`。 | 单例缓存 `get_graph()/get_demo_graph()`。 |
-| `nodes.py` | **legacy 完整图**的节点实现（understand/design_scenarios/…/self_heal），多处 `TODO`：LLM 调用、向量定位器、PR。`retrieve_node` 调用旧 `rag.service.retrieve`。 | 与 `graph.py` demo 节点互不影响；清理时区分。 |
-| `router.py` | **Flash-Only** 模型路由：`ReasoningLevel`、`ModelConfig`、`TASK_ROUTING`、`route(task, force_reasoning, use_local)`、`CostTracker`/`get_cost_tracker()`。 | 需 `DEEPSEEK_API_KEY`；任务名正则映射 low/high。 |
-| `llm.py` | LLM 调用适配层：`call_llm`（litellm 优先，缺失则 httpx 直连）、结构化输出、成本记录；`call_with_retry` 指数退避。 | 当前业务链路默认不真正调用 LLM。 |
-| `management/commands/run_agent_demo.py` | 演示命令 `python manage.py run_agent_demo`：参数 `--goal/--project-id/--count/--execute/--self-heal/--inject-failure`；打印 planner（含 `[retrieved N similar cases]`）、生成、入库、执行、自愈（含 `[retrieved N similar failures]` / `[heal experience]`）。 | Phase C–G 主要验证入口。 |
-| `views.py` | `GenerateTestView`（跑完整图）、`HealView`（五段引擎）、`CostReportView`。 | — |
-| `urls.py` | `/api/v1/agent/{generate,heal,cost}`。 | — |
-| `apps.py` | `AgentConfig`。 | — |
+| `state.py` | `AgentState`：`requirement`、`project_id`、`retrieved_context`、`retrieved_cases`、**`retrieved_knowledge`**、`test_cases`、`plan`/`saved_ids`、**`scenario`/`case_type`/`project_ref_pk`/`api_base_url`/`ui_target_url`/`source`**、`execute`/`execution_*`、自愈字段。 | 节点返回即状态增量。 |
+| `graph.py` | 三套图：<br>① `build_graph()` legacy 完整 9 节点（多为桩）。<br>② `build_demo_graph()` Phase C–G（`generator_node` 现改走 LLM）。<br>③ **`build_generation_graph()`（planner→generator→reporter）** 与 **`build_full_graph()`（+executor 自动自愈）** + `run_full_workflow`。`planner_node` 检索历史用例 + 知识库；`generator_node` 调 `generation.generate_for_scenario`；`reporter_node`/`_save_test_cases` 写新字段与 `scenario` FK。 | 单例 `get_*_graph()`。 |
+| `generation.py` | **LLM 生成核心**：`extract_json`、`call_structured`（JSON 提取 + pydantic 校验 + 一次修复）、`generate_for_scenario`（按 automation 生成三类）、`_api_cases_from_spec`（Swagger 确定性）、`fetch_page_snapshot`（页面感知）、`record_llm_call`、`dedup`/`fingerprint`、`resolve_automation`、`default_ui_target`。 | 不调用真实 LLM 时可 monkeypatch `call_llm` 单测。 |
+| `schemas.py` | `ManualStep/ManualCase/ManualCaseList`、`UIStep/UIAssertion/UICase/UICaseList`、`ApiAssertion/ApiCase/ApiCaseList`、`SCHEMA_BY_KIND`。 | pydantic v2。 |
+| `prompts/__init__.py` | `scenario_context` + `build_manual_prompt` / `build_ui_prompt` / `build_api_prompt`（注入历史用例 few-shot、知识片段、页面元素）；`MANUAL/UI/API_SYSTEM`。 | UI 提示强制 `button:has-text` / `text="..."`。 |
+| `llm.py` | `call_llm`（litellm 优先，缺失 httpx 直连）、`_reasoning_kwargs`（DeepSeek：low 关闭 thinking、high 开启 + `reasoning_effort`）、`call_with_retry`。 | thinking 开启会占 `max_tokens`。 |
+| `router.py` | Flash-Only 路由：`ReasoningLevel`、`ModelConfig`、`TASK_ROUTING`、`route()`、`CostTracker`。 | 需 `DEEPSEEK_API_KEY`。 |
+| `nodes.py` | legacy 完整图节点（多处 TODO），`retrieve_node` 调旧 `rag.service`。 | 与 graph.py demo 节点无关。 |
+| `management/commands/run_agent_demo.py` | Phase C–G 演示命令。 | — |
+| `management/commands/llm_smoke.py` | 真实 LLM 冒烟：`--structured` 校验 pydantic 结构化输出。 | 需 API key。 |
+| `views.py` / `urls.py` | `/api/v1/agent/{generate,heal,cost}`。 | — |
 
 ---
 
 ## 8. `platform/apps/mcp/`（MCP Client + API）
 
-| 文件 | 作用 | 关键符号 / 备注 |
+| 文件 | 作用 | 备注 |
 |---|---|---|
-| `client.py` | MCP 统一客户端：`MCPClient`（`servers=[...]` 过滤，stdio + SSE，`AsyncExitStack` 管理生命周期）、`call_tool`/`list_tools`；便捷函数 `get_client`/`call_tool`/`run_playwright_test`/`run_api_test`/`query_database`/`create_pr`；`_parse_tool_result`。 | 用 `MCP_ENABLED_SERVERS` 或构造参数按名连接子集；`_resolve_command` 用当前解释器，保证 venv 一致。 |
-| `config.json` | MCP server 注册：`echo`/`playwright`/`api`/`db`/`git`（stdio，路径相对仓库根）+ `wharttest_tools`（SSE）。 | 新增 server 在此登记。 |
-| `views.py` / `urls.py` | `GET /api/v1/mcp/tools` 列出已连接工具。 | — |
-| `apps.py` | `McpConfig`。 | — |
+| `client.py` | `MCPClient`（stdio + SSE，按 `servers`/`MCP_ENABLED_SERVERS` 过滤）、`call_tool`/`list_tools`；便捷函数。 | `_resolve_command` 用当前解释器保证 venv。 |
+| `config.json` | server 注册：`echo`/`playwright`/`api`/`db`/`git`（stdio）+ `wharttest_tools`（SSE）。 | — |
+| `views.py` / `urls.py` | `GET /api/v1/mcp/tools`。 | — |
 
 ---
 
@@ -159,113 +172,132 @@
 
 | 文件 | 作用 | 关键符号 / 备注 |
 |---|---|---|
-| `executor.py` | Phase D/E 执行核心。`execute_case(case_id, run_id=None)`：建/并入 `TestRun`，按 `raw_steps` 驱动 Playwright MCP（navigate/fill/click/wait），按 `assertions` 校验，逐条写 `TestStepResult`，汇总与报告；`execute_cases(case_ids)` 批次执行；Phase G 在 `_bulk_create_step_results` 后 `_index_failed_steps` 把失败步骤写入 Qdrant。兼容旧接口 `execute_ui_test/execute_api_test/query_database`。 | `bulk_create` 不走信号，故需显式索引。 |
-| `models.py` | `TestRun`（批次：project/goal/source/status/统计/报告路径/时间）、`TestStepResult`（步骤明细：phase/action/selector/value/expected/actual/status/error/duration_ms，FK 回 TestRun+TestCase）。 | 失败样本来源；被 analyzer 与 RAG 使用。 |
-| `report.py` | 报告生成：`build_report_payload`、`write_report`（输出 `media/reports/run_{id}.json|html`）、`_render_html`。 | HTML 用内联 `<style>`，无模板依赖。 |
-| `admin.py` | `TestRunAdmin`（内联步骤 + 报告链接）、`TestStepResultAdmin`。 | — |
-| `views.py` / `urls.py` | `POST /api/v1/executor/ui/run`、`/api/run` 兼容旧接口。 | — |
-| `apps.py` | `ExecutorConfig`。 | — |
-| `migrations/0001_initial.py` | 建 TestRun/TestStepResult。 | — |
+| `executor.py` | `execute_case`/`execute_cases(..., auto_heal=False)`：建 `TestRun`，逐条驱动。**UI 分支**（Playwright MCP：navigate/fill/click/select/check/hover/press/wait_for/wait），**API 分支**（`_run_api_case` 经 `api_server.send_request`；`_run_api_assertions` 支持 status/json_field/json_contains/json_path_exists/**json_schema**）；失败步骤 `_capture_failure` 截图；手动用例跳过；`_auto_heal` 触发 `selfheal.engine.run` 并统计 healed。 | `bulk_create` 不触发信号，失败索引显式完成。 |
+| `models.py` | `TestRun`、`TestStepResult`（含 `screenshot_path`）。 | 失败样本来源。 |
+| `report.py` | `build_report_payload`/`write_report`（`media/reports/run_{id}.json|html`）。 | — |
+| `admin.py` | TestRun（内联步骤 + 报告链接）、TestStepResult。 | — |
+| `views.py` / `urls.py` | 兼容旧接口 `/api/v1/executor/*`。 | — |
 
 ---
 
-## 10. `platform/apps/selfheal/`（自愈，Phase F 规则驱动 + legacy 五段）
+## 10. `platform/apps/selfheal/`（自愈）
 
 | 文件 | 作用 | 关键符号 / 备注 |
 |---|---|---|
-| `analyzer.py` | 失败分析：`classify(phase,expected,actual,error)` → `(failure_type, confidence)`（selector/timing/navigation/text_mismatch）；`FailureFeature` dataclass（含 Phase G `similar_failures`）；`analyze_step`；`analyze_case(case_id)` 取最近一次失败并为每个特征检索同类历史失败。 | 关键词表在 `_SELECTOR_MARKERS` 等常量。 |
-| `fixer.py` | 规则修复：`FixResult`（含 Phase G `rag_hint`）；`apply_fix(case_id, feature)` 按类型分派并回写 TestCase；`_fix_selector`（snapshot 模糊匹配重定位）、`_fix_assertion`（回放+get_text 刷新期望）、`_fix_timing`（前插 wait）；`_heal_experience` 检索历史成功策略并对未知失败兜底映射。含匹配工具 `_tokens/_best_match/_selector_for`。 | 直接改写 `raw_steps/steps/assertions` 并落库。 |
-| `learner.py` | `record(failure_pattern, fix_strategy, success, ...)`：按 `(failure_pattern, fix_strategy)` 累加尝试/成功次数到 `SelfHealLog` 并返回统计。保存触发 RAG 索引。 | — |
-| `engine.py` | 两套：<br>① `SelfHealEngine` + `FailureContext` + `HealResult` + `heal_failure()`：文档化的**五段闭环**（规则→向量定位器→LLM→重跑→PR），向量/LLM/PR 处仍是 `TODO`/桩。<br>② Phase F `run(case_id)`：analyze → fix → `execute_case` 重跑 → `record` 落库；返回含 `rag_failures`/`rag_hint` 的 attempts。 | 实际可跑的是 `run()`；`views.py`/`agent/views.py` 的 `/heal` 走五段 `heal_failure`。 |
-| `models.py` | `SelfHealLog`：`failure_pattern`、`fix_strategy`、`attempt_count`、`success_count`、`last_testcase`、`last_detail`、`updated_at`，`unique_together`，`success_rate` 属性。 | Phase G 保存即向量化。 |
-| `admin.py` | `SelfHealLogAdmin`（成功率展示）。 | — |
+| `analyzer.py` | `classify` / `FailureFeature` / `analyze_step` / `analyze_case`（取最近失败并检索同类历史失败）。 | 关键词表常量。 |
+| `fixer.py` | `apply_fix`：**API 用例走 `_fix_api_assertion`**（`assertion_refresh` 值漂移 / `field_rename` 字段重命名）；UI 走规则：`_fix_selector`（snapshot 模糊匹配，成功后 `_record_locator`）→ 失败回退 **`_vector_locator_fix`**（`retrieve_locator`）→ 再回退 **`_llm_selector_fix`**（快照候选 + LLM high/low，校验后应用并回写定位器库）；`_fix_assertion`/`_fix_timing`；`_heal_experience`。 | 直接改写 `raw_steps/steps/assertions` 并落库。 |
+| `learner.py` | `record(...)` 累加 `SelfHealLog`。 | — |
+| `engine.py` | ① `SelfHealEngine`/`heal_failure` 五段（文档化，向量/LLM/PR 部分为桩）；② **`run(case_id, failed_step_ids)`** 实际可跑：analyze → fix → `execute_case` 重跑 → record。 | `executor._auto_heal` 调用 `run()`。 |
+| `models.py` | `SelfHealLog`（pattern/strategy 成功率）。 | — |
+| `admin.py` | `SelfHealLogAdmin`。 | — |
+| `management/commands/heal_stats.py` | `manage.py heal_stats` 打印 (失败模式 → 策略) 成功率。 | Phase J。 |
 | `views.py` / `urls.py` | `POST /api/v1/selfheal/heal`。 | — |
-| `apps.py` | `SelfhealConfig`。 | — |
-| `migrations/0001_initial.py` | 建 SelfHealLog。 | — |
 
 ---
 
-## 11. `mcp_servers/`（MCP Server 实现，均 stdio + `MCPServer` 高层 API）
+## 11. `mcp_servers/`（MCP Server，均 stdio + `MCPServer` 高层 API）
 
 | 文件 | 作用 | 工具 / 备注 |
 |---|---|---|
-| `echo_server.py` | 确定性假数据 server（Phase C 起）。`echo(text)`；`fake_generate_test(goal, count, few_shot)` 生成结构化用例，Phase G 会解析 `few_shot` 并**复用历史 selector 模式**（`_extract_selectors`）。 | 供 demo/测试，不调 LLM。 |
-| `playwright_server.py` | 真浏览器（headless Chromium，懒加载复用）：`navigate/click/fill/snapshot/get_text/assert_text/assert_visible/get_locator/run_tests/close`。默认超时 1s，便于自愈拿失败特征；浏览器缺失返回 `{"error": ...}` 不阻断。 | `run_tests` 用 `pytest --json-report`。 |
-| `api_server.py` | 接口测试：`request`（httpx）、`assert_status`、`assert_json`（jsonpath_ng）、`load_openapi`（按规范生成正/负用例）。 | 依赖 `httpx`、`jsonpath_ng`。 |
-| `db_server.py` | 数据一致性断言：`query`、`assert_count`、`assert_exists`；连接用 `asyncpg`，DSN 取 `DATABASE_URL`。 | 依赖 `asyncpg`。 |
-| `git_server.py` | 自愈开 PR：`create_branch`、`commit_changes`、`create_pull_request`（优先 `gh`，回退 GitHub API，需 `GITHUB_TOKEN/GITHUB_REPO`）。 | — |
-| `fixtures/login.html` | 本地登录示例页（`file://`，含延迟 3s 的 `#slow-submit`），供真执行 / 自愈演示。 | 不依赖外部服务。 |
+| `echo_server.py` | 确定性假数据：`echo`、`fake_generate_test`（few-shot 复用 selector）。 | 保留供 demo/测试；**Phase J 生成不再依赖它**。 |
+| `playwright_server.py` | 真浏览器（headless，懒加载复用）：`navigate/click/fill/select/check/hover/press/wait_for/screenshot/snapshot/get_text/assert_text/assert_visible/get_locator/run_tests/close`。默认超时 1s（便于自愈），浏览器缺失返回 `{"error":...}`。 | Phase J 新增 select/check/hover/press/wait_for/screenshot。 |
+| `api_server.py` | 接口测试：`request`、**`send_request`**（executor 用）、`assert_status`、`assert_json`、`load_openapi`。 | 依赖 httpx/jsonpath_ng。 |
+| `db_server.py` | `query`/`assert_count`/`assert_exists`（asyncpg）。 | — |
+| `git_server.py` | `create_branch`/`commit_changes`/`create_pull_request`（gh/API）。 | 需 `GITHUB_TOKEN/REPO`。 |
+| `fixtures/login.html` | 本地登录页（`file://`）；`#phone/#code/#submit/#result`，验证码=123456→登录成功，其它→验证码错误，含 `#slow-submit`。 | 供真执行 / 自愈 / 页面感知演示。 |
 
 ---
 
-## 12. `scripts/`（运维 / 初始化脚本，从仓库根运行）
+## 12. `templates/`（Web 与需求模板）
+
+| 文件 | 作用 |
+|---|---|
+| `core/base.html` | Bootstrap 5 布局 + 导航。 |
+| `core/projects.html` | 项目列表（文档链接 + 批次）。 |
+| `core/upload.html` | 上传需求文档表单。 |
+| `core/doc_detail.html` | 文档 → 场景审核列表 + 批次。 |
+| `core/scenario_edit.html` | 场景编辑（标题/模块/优先级/标签/自动化/规则/测试数据）。 |
+| `core/batch_detail.html` | 批次进度：手动/自动化分栏、重新运行、失败步骤、自愈经验、导出按钮、报告链接；未完成自动刷新。 |
+| `requirements/story_template.md` | **Jira Story 需求模板**（Epic/Sprint/Story + Gherkin + 自动化开关）。 |
+
+---
+
+## 13. `scripts/`（运维 / 初始化脚本）
 
 | 文件 | 作用 | 备注 |
 |---|---|---|
-| `init_qdrant.py` | 初始化旧知识库 collection `test_knowledge` + 调用 `seed_demo` + 校验模型路由。 | 针对 `rag.service`（旧链路），非 Phase G 三个 collection。 |
+| `init_qdrant.py` | 初始化旧知识库 collection + `seed_demo` + 校验路由。 | 针对 `rag.service`（旧链路）。 |
 | `seed_demo.py` | 导入 PRD/接口/缺陷示例文档到旧知识库。 | 同上。 |
-| `generate_diagrams.py` | 生成 `architecture.png`/`cost_comparison.png`/`self_heal_flow.png`（matplotlib）。 | 需中文字体。 |
+| `generate_diagrams.py` | 生成 `architecture.png` 等（matplotlib）。 | — |
 
-> Phase G 说明：**未提供**历史数据批量回填脚本（按需求"不做"）；`testcases/step_results/heal_logs` 仅通过保存钩子增量写入。
+> Phase G/J 的 `testcases/step_results/heal_logs/locator_history` 通过保存钩子增量写入，无批量回填脚本。
 
 ---
 
-## 13. `tests/`
+## 14. `tests/`
 
 | 文件 | 作用 | 覆盖 |
 |---|---|---|
-| `test_e2e.py` | 端到端 / 模块测试：完整工作流（mock RAG/LLM）、五段自愈、成本追踪、旧 RAG 分块与空库检索、Flash 路由、MCP 配置、Phase F 失败分类与 selector 模糊匹配。 | 17 条 |
-| `test_rag_phase_g.py` | Phase G：FakeEmbedder 维度/确定性/相似性、三业务方法 roundtrip、`RAG_ENABLED=0` 与远端不可达降级、planner 注入历史用例、fixer 命中历史策略、indexer 写入检索、echo few-shot selector 复用。 | 13 条 |
-| `pytest.ini` | 测试配置。 | — |
+| `test_e2e.py` | 端到端/模块：完整工作流（mock）、五段自愈、成本、旧 RAG、Flash 路由、MCP 配置、失败分类、selector 模糊匹配。 | — |
+| `test_rag_phase_g.py` | Phase G：Embedder、三业务方法、降级、planner 注入、fixer 经验、indexer、echo few-shot。 | — |
+| `test_phase1_pipeline.py` | Phase I：Markdown 解析、工厂、图编译、API JSON 断言工具。 | — |
+| `test_story_parser.py` | Jira Story 解析（元数据/Gherkin/automation/env/工厂选择）。 | — |
+| `test_openapi_parser.py` | Swagger：refs/endpoints/scenarios（正/负/边界）、确定性 API 用例、json_schema 断言。 | — |
+| `test_generation.py` | LLM 生成：JSON 提取、schema、prompts、automation、normalize、dedup、call_structured 修复、generate_for_scenario。 | — |
+| `test_rag_injection.py` | RAG 注入 prompt、planner 知识检索与容错、知识 collection 常量、降级。 | — |
+| `test_export.py` | 导出：safe_name、manual_rows、UI/API 代码渲染、xlsx/pytest zip/json 产物。 | — |
+| `test_heal_enhance.py` | 自愈增强：selector 提取、字段改名、API 断言刷新、定位器库。 | — |
+| `fixtures/` | `sample_requirements.md`（MD 场景）、`story_requirements.md`（Jira）、`openapi_sample.json`（Swagger）。 | — |
+
+> 运行：从仓库根 `pytest -q`（`pytest.ini` 设 `pythonpath=platform`、`testpaths=tests`）。当前 **103 passed**。
 
 ---
 
-## 14. 数据模型 / 迁移速查
+## 15. 数据模型 / 迁移速查
 
 | 模型 | app | 作用 | 相关迁移 |
 |---|---|---|---|
-| `Project` | core | 项目隔离 | `0001` |
-| `TestCase` | testcases | 用例（含 raw_steps / target_url） | `0001` → `0002`（Phase D）→ `0003`（Phase E deprecated 标注） |
-| `TestRun` / `TestStepResult` | executor | 执行批次 / 步骤明细 | `0001`（Phase E） |
-| `SelfHealLog` | selfheal | `(pattern,strategy)` 成功率统计 | `0001`（Phase F） |
+| `Project` | core | 项目（含 base/api/swagger_url） | `core/0001`→`0002` |
+| `RequirementDoc` | core | 需求文档 | `core/0002` |
+| `Scenario` | core | 解析场景（含 api_spec/source） | `core/0003`→`0005` |
+| `TestGenerationBatch` | core | 生成批次（计数 + run + case_ids） | `core/0002`→`0006` |
+| `ExportJob` | core | 导出任务 | `core/0006` |
+| `LLMCall` | core | LLM 调用/成本 | `core/0004` |
+| `TestCase` | testcases | 用例（kind/test_type/scenario/...） | `testcases/0001`→`0004`→`0005` |
+| `TestRun` / `TestStepResult` | executor | 执行批次 / 步骤明细 | `executor/0001` |
+| `SelfHealLog` | selfheal | 自愈成功率统计 | `selfheal/0001` |
 
 > `makemigrations --check` 当前应无变更；改模型后必须补迁移。
 
 ---
 
-## 15. 关键环境变量（详见 `.env.example` / `settings.py`）
+## 16. 关键环境变量（详见 `.env.example` / `settings.py`）
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` | — | 模型路由，缺失时 `route()` 抛错 |
-| `DEEPSEEK_MODEL` | `deepseek-flash` | 唯一模型，reasoning 分档 |
+| `DEEPSEEK_MODEL` | `deepseek-flash` | 唯一模型，reasoning 分档（low 关闭 thinking / high 开启） |
 | `DATABASE_URL` 或 `DB_*` | `ai_test` | PostgreSQL |
-| `QDRANT_URL` / `QDRANT_API_KEY` | `http://localhost:6333` | 远端 Qdrant |
-| `QDRANT_MODE` | `auto` | `auto`(远端优先→本地兜底)/`remote`/`local`/`memory`/`off` |
-| `QDRANT_LOCAL_PATH` | `platform/.qdrant_local` | 本地嵌入式索引目录 |
+| `QDRANT_URL` / `QDRANT_MODE` / `QDRANT_LOCAL_PATH` | `auto` / `platform/.qdrant_local` | 远端优先→本地兜底 |
 | `RAG_ENABLED` | `1` | `0` = 检索/写入全降级 |
-| `RAG_SCORE_THRESHOLD` | `0.0` | 仅用 score 阈值过滤（不接 reranker） |
-| `RAG_EMBEDDER` | `fake` | `fake`(dim=8) / `bge`(生产) |
-| `RAG_FAKE_DIM` | `8` | FakeEmbedder 维度 |
-| `EMBEDDING_BASE_URL` / `EMBEDDING_MODEL` / `EMBEDDING_DIM` | `localhost:8000/v1` / `BAAI/bge-m3` / `1024` | BGE embedder |
-| `RAG_INDEX_ASYNC` | `0` | `1` = 向量写入改后台线程 |
-| `MCP_CONFIG` / `MCP_ENABLED_SERVERS` | — | MCP 配置路径 / server 子集 |
+| `RAG_EMBEDDER` / `RAG_FAKE_DIM` | `fake` / `8` | `bge` 为生产 |
+| `EMBEDDING_BASE_URL` / `EMBEDDING_MODEL` / `EMBEDDING_DIM` | `localhost:8000/v1` / `BAAI/bge-m3` / `1024` | BGE |
+| `RAG_INDEX_ASYNC` | `0` | `1` = 后台线程写入 |
+| `MCP_CONFIG` / `MCP_ENABLED_SERVERS` | — | MCP 配置 / server 子集 |
 | `RETRY_BUDGET` / `DAILY_BUDGET` | `3` / `10.0` | 成本保护 |
 
 ---
 
-## 16. 人工修改 / 审核清单（重点）
+## 17. 人工修改 / 审核清单（重点）
 
-1. **两套 RAG 勿混淆**：`rag/service.py`（旧知识库，含失效的 `client.search`）与 Phase G 的
-   `embedder/retriever/indexer/signals`。新功能走 Phase G；若要复用旧知识库需先修 `service.retrieve`。
-2. **两套自愈勿混淆**：`selfheal/engine.py::run()`（真实可跑，规则驱动）与
-   `SelfHealEngine.heal()/heal_failure()`（文档化五段，向量/LLM/PR 仍为桩）。
-3. **两套图勿混淆**：`graph.build_graph()`（legacy 完整图，多节点 TODO）与
-   `graph.build_demo_graph()`（Phase C–G 可跑闭环）。
-4. **信号 vs bulk_create**：`TestCase`/`SelfHealLog` 用 `post_save`，但 `TestStepResult` 走
-   `bulk_create` 不触发信号，失败索引在 `executor._index_failed_steps` 显式完成；新增批量写入时注意。
-5. **Qdrant 降级**：所有 RAG 操作必须保持 best-effort（异常返回空/跳过），不得阻断主流程。
-6. **无 Docker 环境**：默认 `QDRANT_MODE=auto` 本地嵌入式兜底；`docker-compose` 仅在有 Docker 时使用。
-7. **模型维度一致性**：切换 `RAG_EMBEDDER`（fake 8 ↔ bge 1024）后，`ensure_collection` 会因维度不符重建
-   collection，历史向量需重新写入（当前无回填脚本）。
-8. **密钥安全**：`.env` 已在 `.gitignore`；提交前确认未把密钥/索引数据纳入版本控制。
+1. **三套解析器**：`markdown_parser`（通用）/ `story_parser`（Jira，`looks_like_story` 命中）/ `openapi_parser`（Swagger）。`parser_factory.get_parser(type, text)` 会按文本特征选 Story；新增格式请在此注册。
+2. **Swagger 用例为确定性生成**（`generation._api_cases_from_spec`，不走 LLM）；Story 的 `关联接口` 才走 LLM。二者勿混。
+3. **手动 vs 自动化**：`TestCase.kind` 区分；`execute_cases` 只执行 `automated`；手动用例进 Excel 导出。
+4. **两套自愈勿混淆**：`engine.run()`（真实可跑）与 `SelfHealEngine.heal()/heal_failure()`（文档化五段，部分桩）。
+5. **两套图勿混淆**：`build_graph()`（legacy 桩）/ `build_demo_graph()`（Phase C–G）/ `build_generation_graph()`+`build_full_graph()`（Phase I/J）。
+6. **两套 RAG**：`rag/service.py`（旧，`client.search` 已失效）与 Phase G/J `embedder/retriever/indexer`；知识库读取用 `retrieve_knowledge`。
+7. **LLM thinking**：DeepSeek Flash 默认开启 thinking 会占满 `max_tokens` 导致 content 为空；`llm._reasoning_kwargs` 对 low 关闭、high 开启。
+8. **信号 vs bulk_create**：`TestCase`/`SelfHealLog` 用 `post_save`；`TestStepResult` 走 `bulk_create`，失败索引在 `executor._index_failed_steps` 显式完成。
+9. **Qdrant 降级**：所有 RAG 操作 best-effort（异常返回空/跳过），不得阻断主流程。
+10. **模型维度一致性**：切换 `RAG_EMBEDDER`（fake 8 ↔ bge 1024）后 collection 会重建，历史向量需重写（无回填脚本）。
+11. **密钥安全**：`.env` 已在 `.gitignore`，提交前确认未纳入密钥/索引数据。
