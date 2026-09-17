@@ -13,6 +13,7 @@
 """
 import asyncio
 import json
+import re
 import time
 
 from asgiref.sync import sync_to_async
@@ -122,7 +123,7 @@ async def execute_case(case_id: int, run_id: int | None = None) -> dict:
 
     own_run = run_id is None
     if own_run:
-        run = await sync_to_async(_create_run)(case.project_id, case.title, "executor:single", 1)
+        run = await sync_to_async(_create_run)(case.project_key, case.title, "executor:single", 1)
         run_id = run.pk
 
     result = await _execute_case_into_run(case, run_id)
@@ -143,8 +144,12 @@ async def execute_cases(
     goal: str = "",
     source: str = "executor:batch",
     project_id: str = "",
+    auto_heal: bool = False,
 ) -> dict:
-    """一个批次执行多条用例，统一生成 TestRun + 报告。"""
+    """一个批次执行多条用例，统一生成 TestRun + 报告。
+
+    auto_heal=True 时，对存在 fail/error 的用例自动触发规则自愈（Phase I 默认串联）。
+    """
     case_ids = [int(c) for c in case_ids]
     if not case_ids:
         return {
@@ -155,11 +160,13 @@ async def execute_cases(
             "failed": 0,
             "results": [],
             "report": {},
+            "heal_results": [],
+            "healed": 0,
         }
 
     if not project_id:
         first = await sync_to_async(_load_case)(case_ids[0])
-        project_id = first.project_id
+        project_id = first.project_key
 
     run = await sync_to_async(_create_run)(project_id, goal, source, len(case_ids))
     results = [await execute_case(cid, run_id=run.pk) for cid in case_ids]
@@ -170,7 +177,7 @@ async def execute_cases(
     await sync_to_async(_save_report_paths)(run.pk, paths["json"], paths["html"])
 
     passed = sum(1 for r in results if r["status"] == "pass")
-    return {
+    output = {
         "run_id": run.pk,
         "status": run_obj.status,
         "total": len(results),
@@ -178,7 +185,48 @@ async def execute_cases(
         "failed": len(results) - passed,
         "results": results,
         "report": paths,
+        "heal_results": [],
+        "healed": 0,
     }
+
+    if auto_heal:
+        heal_results = await _auto_heal(results, run.pk)
+        output["heal_results"] = heal_results
+        output["healed"] = sum(1 for h in heal_results if h.get("healed"))
+
+    return output
+
+
+async def _auto_heal(results: list[dict], run_id: int) -> list[dict]:
+    """执行后自动自愈失败用例（Phase I）。"""
+    from apps.selfheal.engine import run as run_selfheal
+
+    failed = [r for r in results if r["status"] in ("fail", "error")]
+    heal_results = []
+    for result in failed:
+        step_ids = await sync_to_async(_failed_step_ids)(result["case_id"], run_id)
+        try:
+            heal = await run_selfheal(result["case_id"], step_ids)
+        except Exception as exc:  # noqa: BLE001 - 自愈异常不阻断批次
+            heal = {
+                "case_id": result["case_id"],
+                "healed": False,
+                "failure_count": 0,
+                "attempts": [],
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        heal_results.append(heal)
+    return heal_results
+
+
+def _failed_step_ids(case_id: int, run_id: int) -> list[int]:
+    from .models import TestStepResult
+
+    return list(
+        TestStepResult.objects.filter(
+            run_id=run_id, testcase_id=case_id, status__in=["fail", "error"]
+        ).values_list("pk", flat=True)
+    )
 
 
 def _write_report(run) -> dict:
@@ -199,9 +247,22 @@ async def _execute_case_into_run(case, run_id: int) -> dict:
     log_lines: list[str] = []
     status = "pass"
 
+    is_api = any(
+        str(step.get("action") or "").lower() in ("request", "api_request")
+        for step in steps
+    )
+
     if not steps:
         status = "skipped"
         log_lines.append("no steps to execute")
+    elif is_api:
+        try:
+            status = await _run_api_case(
+                case, run_id, steps, assertions, rows, log_lines
+            )
+        except Exception as exc:
+            status = "error"
+            log_lines.append(f"api execution exception: {type(exc).__name__}: {exc}")
     else:
         try:
             from apps.mcp.client import MCPClient
@@ -230,6 +291,144 @@ async def _execute_case_into_run(case, run_id: int) -> dict:
         "rows": len(rows),
         "log": "\n".join(log_lines),
     }
+
+
+async def _run_api_case(
+    case, run_id: int, steps: list[dict], assertions: list[dict],
+    rows: list[dict], log_lines: list[str],
+) -> str:
+    """API 用例执行：经 api_server MCP 发请求，再本地校验断言。"""
+    from apps.mcp.client import MCPClient
+
+    responses: list[dict] = []
+    async with MCPClient(servers=["api"]) as mcp:
+        for idx, step in enumerate(steps, 1):
+            action = str(step.get("action") or "").lower()
+            if action not in ("request", "api_request"):
+                rows.append(_step_row(
+                    case.pk, run_id, idx, "step", action, "", "", "", "",
+                    "skip", f"unknown api action '{action}'", 0,
+                ))
+                log_lines.append(f"[api step {idx}] SKIP unknown action '{action}'")
+                continue
+
+            method = (step.get("method") or "GET").upper()
+            url = step.get("url") or case.target_url
+            headers = step.get("headers") or {}
+            body = step.get("body") or step.get("json") or {}
+            params = step.get("params") or {}
+
+            started = time.perf_counter()
+            error = ""
+            data: dict = {}
+            try:
+                result = await mcp.call_tool(
+                    "api",
+                    "send_request",
+                    {
+                        "method": method,
+                        "url": url,
+                        "headers": headers,
+                        "json": body,
+                        "params": params,
+                    },
+                )
+                data = _as_dict(result)
+                if isinstance(data, dict) and data.get("error"):
+                    error = str(data["error"])
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"
+
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            status_code = data.get("status_code") if isinstance(data, dict) else None
+            actual = _short({"status_code": status_code, "body": data.get("body")})
+            rows.append(_step_row(
+                case.pk, run_id, idx, "step", f"request {method}", url,
+                _short(body), "", actual, "error" if error else "pass", error, duration_ms,
+            ))
+            log_lines.append(
+                f"[api step {idx}] {method} {url} -> "
+                f"{error or f'status={status_code}'}"
+            )
+            responses.append(data if isinstance(data, dict) else {})
+            if error:
+                return "error"
+
+    return _run_api_assertions(case, run_id, assertions, responses, rows, log_lines, len(steps))
+
+
+def _run_api_assertions(
+    case, run_id: int, assertions: list[dict], responses: list[dict],
+    rows: list[dict], log_lines: list[str], step_offset: int,
+) -> str:
+    if not assertions:
+        log_lines.append("[api assert] no assertions, treated as pass")
+        return "pass"
+
+    outcome = "pass"
+    first = responses[0] if responses else {}
+    for idx, assertion in enumerate(assertions, 1):
+        a_type = assertion.get("type", "status_equals")
+        expected = assertion.get("expected")
+        row_index = step_offset + idx
+        passed = False
+        actual = ""
+        error = ""
+
+        if a_type == "status_equals":
+            actual = first.get("status_code")
+            passed = actual == expected
+        elif a_type in ("json_field", "json_equals"):
+            path = assertion.get("path", "")
+            actual = _json_path_get(first.get("body"), path)
+            passed = actual == expected or str(actual) == str(expected)
+        elif a_type == "json_contains":
+            path = assertion.get("path", "")
+            actual = _json_path_get(first.get("body"), path)
+            passed = str(expected) in str(actual)
+        elif a_type == "json_path_exists":
+            path = assertion.get("path", "")
+            actual = _json_path_get(first.get("body"), path)
+            passed = actual is not None
+        else:
+            rows.append(_step_row(
+                case.pk, run_id, row_index, "assert", a_type, "", "", "",
+                "", "skip", f"unknown assertion type '{a_type}'", 0,
+            ))
+            log_lines.append(f"[api assert {idx}] SKIP unknown type '{a_type}'")
+            continue
+
+        step_status = "pass" if passed else "fail"
+        if not passed and outcome != "error":
+            outcome = "fail"
+        rows.append(_step_row(
+            case.pk, run_id, row_index, "assert", a_type, "", "",
+            str(expected), str(actual), step_status, error, 0,
+        ))
+        log_lines.append(
+            f"[api assert {idx}] {a_type} expected={expected!r} "
+            f"actual={actual!r} -> {step_status}"
+        )
+    return outcome
+
+
+def _json_path_get(obj, path: str):
+    """简易 JSON 路径取值：支持 a.b.c / $.a.b / a[0]。"""
+    if obj is None or not path:
+        return None
+    tokens = [t for t in re.split(r"\.|\[|\]|\$|'", str(path)) if t]
+    current = obj
+    for token in tokens:
+        if isinstance(current, dict):
+            current = current.get(token)
+        elif isinstance(current, list):
+            try:
+                current = current[int(token)]
+            except (ValueError, IndexError):
+                return None
+        else:
+            return None
+    return current
 
 
 async def _run_steps(

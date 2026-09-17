@@ -24,6 +24,13 @@ class AgentState(TypedDict, total=False):
     project_id: str
     knowledge_ids: list[str]            # RAG 检索到的知识片段
 
+    # Phase I 需求文档驱动
+    scenario: dict                      # 单个解析场景（title/type/spec/...）
+    case_type: str                      # "ui" | "api"
+    project_ref_pk: int                 # core.Project 主键
+    api_base_url: str                   # API 根地址覆盖（可空）
+    source: str                         # 用例来源标记
+
     # RAG
     retrieved_context: list[dict]       # [{"content": ..., "score": ..., "source": ...}]
 

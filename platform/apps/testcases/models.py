@@ -14,7 +14,16 @@ class TestCase(models.Model):
         P1 = "P1", "P1 - 主要功能"
         P2 = "P2", "P2 - 次要/边界"
 
-    project_id = models.CharField(max_length=64, db_index=True)
+    project = models.ForeignKey(
+        "core.Project",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="testcases",
+    )
+    project_key = models.CharField(
+        max_length=64, db_index=True, blank=True, default=""
+    )
     title = models.CharField(max_length=300)
     preconditions = models.JSONField(default=list, blank=True)
     steps = models.JSONField(default=list, blank=True)

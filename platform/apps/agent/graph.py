@@ -143,35 +143,152 @@ def _few_shot_payload(retrieved: list[dict]) -> str:
     return json.dumps(shots, ensure_ascii=False) if shots else ""
 
 
+def _login_fixture_url() -> str:
+    """本地登录示例页（file://），供确定性 UI 用例执行。"""
+    from pathlib import Path
+
+    fixture = (
+        Path(__file__).resolve().parents[3]
+        / "mcp_servers" / "fixtures" / "login.html"
+    )
+    return fixture.as_uri()
+
+
 async def generator_node(state: AgentState) -> dict:
-    """通过 stdio MCP 调用 echo server 生成结构化用例（注入历史 few-shot）。"""
+    """按场景类型生成用例：UI → Playwright steps；API → api_server MCP。"""
+    if state.get("case_type") == "api":
+        test_cases = await _generate_api_cases(state)
+    else:
+        test_cases = await _generate_ui_cases(state)
+    return {
+        "test_cases": test_cases,
+        "few_shot_used": len(state.get("retrieved_cases", [])),
+    }
+
+
+async def _generate_ui_cases(state: AgentState) -> list[dict]:
+    """UI 场景：优先使用文档显式 steps，否则回退 echo MCP 生成。"""
     from apps.mcp.client import MCPClient
+
+    scenario = state.get("scenario") or {}
+    spec = scenario.get("spec") or {}
+    if spec.get("type") == "ui" or spec.get("steps"):
+        target_url = spec.get("target_url") or _login_fixture_url()
+        steps = [dict(step) for step in spec.get("steps", [])]
+        for step in steps:
+            if (step.get("action") or "").lower() in ("goto", "navigate") and not step.get("value"):
+                step["value"] = target_url
+        return [
+            {
+                "title": scenario.get("title") or state["requirement"],
+                "preconditions": scenario.get("acceptance_criteria", []),
+                "steps": steps,
+                "assertions": spec.get("assertions", []),
+                "priority": scenario.get("priority", "P1"),
+                "tags": scenario.get("tags") or ["ui"],
+                "target_url": target_url,
+            }
+        ]
 
     goal = state["requirement"]
     count = int(state.get("case_count", 3))
-    retrieved = state.get("retrieved_cases", [])
-    few_shot = _few_shot_payload(retrieved)
-
+    few_shot = _few_shot_payload(state.get("retrieved_cases", []))
     async with MCPClient(servers=["echo"]) as mcp:
         raw = await mcp.call_tool(
             "echo",
             "fake_generate_test",
             {"goal": goal, "count": count, "few_shot": few_shot},
         )
-
-    test_cases = json.loads(raw) if isinstance(raw, str) else raw
-    return {"test_cases": test_cases, "few_shot_used": len(retrieved)}
+    return json.loads(raw) if isinstance(raw, str) else raw
 
 
-def _save_test_cases(project_id: str, test_cases: list[dict], source: str) -> list[int]:
+async def _generate_api_cases(state: AgentState) -> list[dict]:
+    """API 场景：构造 request steps + assertions，并经 api_server MCP 探测。"""
+    from apps.mcp.client import MCPClient
+
+    scenario = state.get("scenario") or {}
+    api = scenario.get("api") or {}
+    method = (api.get("method") or "GET").upper()
+    path = api.get("path") or ""
+    base_url = state.get("api_base_url") or ""
+    if path.startswith("http://") or path.startswith("https://"):
+        url = path
+    elif base_url:
+        url = base_url.rstrip("/") + (path if path.startswith("/") else f"/{path}")
+    else:
+        url = path
+
+    headers = api.get("headers") or {}
+    body = api.get("body") or {}
+    params = api.get("params") or {}
+    assertions = api.get("assertions") or [
+        {"type": "status_equals", "expected": api.get("expected_status", 200)}
+    ]
+
+    # Phase I：生成阶段经 api_server MCP 探测接口（失败不阻断）
+    baseline = {}
+    if url:
+        try:
+            async with MCPClient(servers=["api"]) as mcp:
+                raw = await mcp.call_tool(
+                    "api",
+                    "send_request",
+                    {
+                        "method": method,
+                        "url": url,
+                        "headers": headers,
+                        "json": body,
+                        "params": params,
+                    },
+                )
+            baseline = json.loads(raw) if isinstance(raw, str) else raw
+        except Exception as exc:  # noqa: BLE001
+            baseline = {"error": f"{type(exc).__name__}: {exc}"}
+
+    step = {
+        "action": "request",
+        "method": method,
+        "url": url,
+        "headers": headers,
+        "body": body,
+        "params": params,
+        "description": scenario.get("title") or state["requirement"],
+    }
+    return [
+        {
+            "title": scenario.get("title") or state["requirement"],
+            "preconditions": scenario.get("acceptance_criteria", []),
+            "steps": [step],
+            "assertions": assertions,
+            "priority": scenario.get("priority", "P1"),
+            "tags": scenario.get("tags") or ["api"],
+            "target_url": url,
+            "api_baseline": baseline,
+        }
+    ]
+
+
+def _save_test_cases(
+    project_id: str,
+    test_cases: list[dict],
+    source: str,
+    project_ref_pk: int | None = None,
+) -> list[int]:
     """同步写入 TestCase（由 sync_to_async 包装，避免 async ORM 限制）。"""
     from apps.testcases.models import TestCase
+
+    project = None
+    if project_ref_pk:
+        from apps.core.models import Project
+
+        project = Project.objects.filter(pk=project_ref_pk).first()
 
     saved_ids: list[int] = []
     for case in test_cases:
         steps = case.get("steps", [])
         obj = TestCase.objects.create(
-            project_id=project_id,
+            project=project,
+            project_key=project_id,
             title=case["title"],
             preconditions=case.get("preconditions", []),
             steps=steps,
@@ -195,7 +312,8 @@ async def reporter_node(state: AgentState) -> dict:
     saved_ids = await sync_to_async(_save_test_cases)(
         project_id,
         test_cases,
-        "agent:run_agent_demo",
+        state.get("source") or "agent:run_agent_demo",
+        state.get("project_ref_pk"),
     )
     return {
         "saved_ids": saved_ids,
@@ -295,6 +413,114 @@ def get_demo_graph():
     if _demo_graph is None:
         _demo_graph = build_demo_graph()
     return _demo_graph
+
+
+# ============================================================
+# Phase I：生成图（planner → generator → reporter，仅生成）
+# ============================================================
+def build_generation_graph():
+    """仅生成不含执行的图：planner → generator → reporter。"""
+    graph = StateGraph(AgentState)
+    graph.add_node("planner", planner_node)
+    graph.add_node("generator", generator_node)
+    graph.add_node("reporter", reporter_node)
+
+    graph.set_entry_point("planner")
+    graph.add_edge("planner", "generator")
+    graph.add_edge("generator", "reporter")
+    graph.add_edge("reporter", END)
+
+    return graph.compile()
+
+
+_generation_graph = None
+
+
+def get_generation_graph():
+    global _generation_graph
+    if _generation_graph is None:
+        _generation_graph = build_generation_graph()
+    return _generation_graph
+
+
+# ============================================================
+# Phase I：完整图（planner → generator → reporter → executor[含自愈]）
+# ============================================================
+async def full_executor_node(state: AgentState) -> dict:
+    """执行 reporter 入库用例，并默认自动自愈失败用例（无需 flag）。"""
+    from apps.executor.executor import execute_cases
+
+    case_ids = state.get("saved_ids", [])
+    if not case_ids:
+        return {"execution_results": [], "heal_results": []}
+
+    batch = await execute_cases(
+        case_ids,
+        goal=state.get("requirement", ""),
+        source=state.get("source") or "agent:full",
+        project_id=state.get("project_id") or "demo",
+        auto_heal=True,
+    )
+    return {
+        "execution_results": batch["results"],
+        "execution_run_id": batch["run_id"],
+        "execution_report": batch.get("report", {}),
+        "heal_results": batch.get("heal_results", []),
+    }
+
+
+def build_full_graph():
+    """默认串联执行+自愈：planner → generator → reporter → executor[heal]。"""
+    graph = StateGraph(AgentState)
+    graph.add_node("planner", planner_node)
+    graph.add_node("generator", generator_node)
+    graph.add_node("reporter", reporter_node)
+    graph.add_node("executor", full_executor_node)
+
+    graph.set_entry_point("planner")
+    graph.add_edge("planner", "generator")
+    graph.add_edge("generator", "reporter")
+    graph.add_edge("reporter", "executor")
+    graph.add_edge("executor", END)
+
+    return graph.compile()
+
+
+_full_graph = None
+
+
+def get_full_graph():
+    global _full_graph
+    if _full_graph is None:
+        _full_graph = build_full_graph()
+    return _full_graph
+
+
+async def run_full_workflow(
+    requirement: str,
+    project_id: str = "demo",
+    case_count: int = 3,
+    *,
+    project_ref_pk: int | None = None,
+    case_type: str = "ui",
+    scenario: dict | None = None,
+    api_base_url: str = "",
+    source: str = "agent:full",
+) -> dict:
+    """一键运行 生成 → 执行 → 自愈 全链路。"""
+    initial_state: AgentState = {
+        "requirement": requirement,
+        "project_id": project_id,
+        "case_count": case_count,
+        "project_ref_pk": project_ref_pk,
+        "case_type": case_type,
+        "scenario": scenario or {},
+        "api_base_url": api_base_url,
+        "source": source,
+        "test_cases": [],
+        "retrieved_cases": [],
+    }
+    return await get_full_graph().ainvoke(initial_state)
 
 
 async def run_agent_demo_workflow(

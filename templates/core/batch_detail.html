@@ -1,0 +1,74 @@
+{% extends "core/base.html" %}
+{% block title %}批次 #{{ batch.pk }}{% endblock %}
+{% block content %}
+{% if batch.status != "done" and batch.status != "failed" %}
+<meta http-equiv="refresh" content="5" />
+{% endif %}
+<h1 class="h4 mb-3">批次 #{{ batch.pk }}
+  <span class="badge text-bg-secondary">{{ batch.get_status_display }}</span>
+</h1>
+<p class="text-muted">
+  项目：{{ batch.project.name }} &nbsp;|&nbsp;
+  文档：{{ batch.doc.title }} &nbsp;|&nbsp;
+  场景：{{ batch.total }}
+</p>
+
+<div class="row text-center mb-4">
+  <div class="col"><div class="card card-body"><div class="h4">{{ batch.total }}</div><small>场景</small></div></div>
+  <div class="col"><div class="card card-body"><div class="h4">{{ batch.generated }}</div><small>生成用例</small></div></div>
+  <div class="col"><div class="card card-body"><div class="h4">{{ batch.executed }}</div><small>执行</small></div></div>
+  <div class="col"><div class="card card-body"><div class="h4 text-success">{{ batch.healed }}</div><small>自愈</small></div></div>
+</div>
+
+{% if batch.error_message %}
+<div class="alert alert-warning">{{ batch.error_message }}</div>
+{% endif %}
+
+{% if batch.run_id %}
+<p>
+  执行批次：<b>TestRun #{{ batch.run.pk }}</b>
+  <span class="badge text-bg-secondary">{{ batch.run.status }}</span>
+  {{ batch.run.passed_cases }}/{{ batch.run.total_cases }} passed
+  &nbsp;
+  <a class="btn btn-sm btn-primary" href="{% url 'web-batch-report' batch.pk %}">查看报告</a>
+</p>
+{% else %}
+<p class="text-muted">执行报告生成中…</p>
+{% endif %}
+
+<h2 class="h6 mt-4">生成的用例</h2>
+<table class="table table-sm bg-white">
+  <thead><tr><th>#</th><th>标题</th><th>优先级</th><th>最近状态</th><th>来源</th></tr></thead>
+  <tbody>
+    {% for case in cases %}
+    <tr>
+      <td>{{ case.id }}</td>
+      <td>{{ case.title }}</td>
+      <td>{{ case.priority }}</td>
+      <td>{{ case.last_run_status|default:"-" }}</td>
+      <td class="text-muted small">{{ case.source }}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="5" class="text-muted">生成中…</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if failed_steps %}
+<h2 class="h6 mt-4">失败步骤（自愈样本）</h2>
+<table class="table table-sm bg-white">
+  <thead><tr><th>用例</th><th>阶段</th><th>动作</th><th>选择器</th><th>错误</th></tr></thead>
+  <tbody>
+    {% for step in failed_steps %}
+    <tr>
+      <td>{{ step.testcase.title }}</td>
+      <td>{{ step.phase }}{{ step.step_index }}</td>
+      <td>{{ step.action }}</td>
+      <td><code>{{ step.selector }}</code></td>
+      <td class="text-danger small">{{ step.error }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

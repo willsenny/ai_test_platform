@@ -18,5 +18,5 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         queryset = TestCase.objects.all()
         project_id = self.request.query_params.get("project_id")
         if project_id:
-            queryset = queryset.filter(project_id=project_id)
+            queryset = queryset.filter(project_key=project_id)
         return queryset

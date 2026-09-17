@@ -1,0 +1,50 @@
+{% extends "core/base.html" %}
+{% block title %}项目列表{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3">项目</h1>
+<div class="row g-3">
+  {% for project in projects %}
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h6 card-title mb-1">
+          {{ project.name }} <span class="text-muted">({{ project.key }})</span>
+        </h2>
+        <p class="text-muted small mb-2">
+          UI: {{ project.base_url|default:"-" }} &nbsp;|&nbsp;
+          API: {{ project.api_base_url|default:"-" }}
+        </p>
+        <h3 class="h6">需求文档</h3>
+        <ul class="list-unstyled small">
+          {% for doc in project.requirements.all %}
+          <li>
+            #{{ doc.id }} {{ doc.title }}
+            <span class="badge text-bg-secondary">{{ doc.get_status_display }}</span>
+            <span class="text-muted">场景 {{ doc.scenario_count }}</span>
+          </li>
+          {% empty %}
+          <li class="text-muted">暂无</li>
+          {% endfor %}
+        </ul>
+        <h3 class="h6">生成批次</h3>
+        <ul class="list-unstyled small">
+          {% for batch in project.generation_batches.all %}
+          <li>
+            <a href="{% url 'web-batch-detail' batch.pk %}">批次 #{{ batch.pk }}</a>
+            <span class="badge text-bg-secondary">{{ batch.get_status_display }}</span>
+            <span class="text-muted">
+              {{ batch.generated }}/{{ batch.total }} 生成 · {{ batch.healed }} 自愈
+            </span>
+          </li>
+          {% empty %}
+          <li class="text-muted">暂无</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+  {% empty %}
+  <div class="col-12"><p class="text-muted">暂无项目，请先在 Admin 创建。</p></div>
+  {% endfor %}
+</div>
+{% endblock %}

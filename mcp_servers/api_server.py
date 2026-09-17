@@ -47,6 +47,22 @@ async def request(
     return _json.dumps(result, ensure_ascii=False, indent=2)
 
 
+@mcp.tool(
+    name="send_request",
+    description="发起 HTTP 请求并返回状态码/响应体（供 executor 执行 API 用例）",
+)
+async def send_request(
+    method: str,
+    url: str,
+    headers: dict | None = None,
+    json: dict | None = None,
+    params: dict | None = None,
+) -> str:
+    return await request(
+        method=method, url=url, headers=headers, json=json, params=params
+    )
+
+
 @mcp.tool(name="assert_status", description="断言响应状态码")
 async def assert_status(expected: int, actual: int) -> str:
     passed = expected == actual

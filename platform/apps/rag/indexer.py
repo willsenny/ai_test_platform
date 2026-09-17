@@ -113,7 +113,8 @@ def index_testcase(case) -> bool:
         embedder = get_embedder()
         payload = {
             "title": getattr(case, "title", ""),
-            "project_id": getattr(case, "project_id", ""),
+            "project_id": getattr(case, "project_key", None)
+            or getattr(case, "project_id", ""),
             "priority": getattr(case, "priority", ""),
             "tags": list(getattr(case, "tags", None) or []),
             "target_url": getattr(case, "target_url", ""),

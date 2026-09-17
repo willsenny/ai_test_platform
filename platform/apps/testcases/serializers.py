@@ -4,10 +4,14 @@ from .models import TestCase
 
 
 class TestCaseSerializer(serializers.ModelSerializer):
+    # 兼容旧字段名：project_id 映射到 project_key
+    project_id = serializers.CharField(source="project_key", required=False)
+
     class Meta:
         model = TestCase
         fields = [
             "id",
+            "project",
             "project_id",
             "title",
             "preconditions",

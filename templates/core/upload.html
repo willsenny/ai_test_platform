@@ -1,0 +1,28 @@
+{% extends "core/base.html" %}
+{% block title %}上传需求文档{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3">上传需求文档</h1>
+{% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+<form method="post" enctype="multipart/form-data" class="card card-body">
+  {% csrf_token %}
+  <div class="mb-3">
+    <label class="form-label">所属项目</label>
+    <select name="project_id" class="form-select" required>
+      <option value="">请选择</option>
+      {% for project in projects %}
+      <option value="{{ project.pk }}">{{ project.name }} ({{ project.key }})</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">需求文档（Markdown）</label>
+    <input type="file" name="file" class="form-control" accept=".md,.markdown,.txt" required />
+  </div>
+  <div>
+    <button class="btn btn-primary" type="submit">上传并开始生成</button>
+  </div>
+  <p class="text-muted small mt-3 mb-0">
+    上传后将自动：解析场景 → 批量生成用例 → 执行 → 失败自愈 → 生成报告。
+  </p>
+</form>
+{% endblock %}
