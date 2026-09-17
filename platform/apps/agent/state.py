@@ -37,6 +37,7 @@ class AgentState(TypedDict, total=False):
 
     # Phase G RAG
     retrieved_cases: list[dict]         # [{"id", "payload", "score"}] 历史相似用例
+    retrieved_knowledge: list[dict]     # [{"content","score","source","doc_type"}] 知识库
     few_shot_used: int                  # 注入生成器的历史用例数
 
     # 生成

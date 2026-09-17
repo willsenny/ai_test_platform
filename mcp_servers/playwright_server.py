@@ -18,6 +18,7 @@ import asyncio
 import json as _json
 import os
 import sys
+import time
 from pathlib import Path
 
 from mcp.server import MCPServer
@@ -110,6 +111,69 @@ async def fill(selector: str, value: str) -> str:
         page = await _get_page()
         await page.fill(selector, value)
         return _ok({"filled": selector, "value": value})
+    except Exception as exc:
+        return _err(exc)
+
+
+@mcp.tool(name="select", description="在下拉框选择 value")
+async def select(selector: str, value: str) -> str:
+    try:
+        page = await _get_page()
+        await page.select_option(selector, value)
+        return _ok({"selected": selector, "value": value})
+    except Exception as exc:
+        return _err(exc)
+
+
+@mcp.tool(name="check", description="勾选复选框")
+async def check(selector: str) -> str:
+    try:
+        page = await _get_page()
+        await page.check(selector)
+        return _ok({"checked": selector})
+    except Exception as exc:
+        return _err(exc)
+
+
+@mcp.tool(name="hover", description="悬停到元素")
+async def hover(selector: str) -> str:
+    try:
+        page = await _get_page()
+        await page.hover(selector)
+        return _ok({"hovered": selector})
+    except Exception as exc:
+        return _err(exc)
+
+
+@mcp.tool(name="press", description="在元素上按键（如 Enter）")
+async def press(selector: str, key: str) -> str:
+    try:
+        page = await _get_page()
+        await page.press(selector, key)
+        return _ok({"pressed": selector, "key": key})
+    except Exception as exc:
+        return _err(exc)
+
+
+@mcp.tool(name="wait_for", description="等待元素出现")
+async def wait_for(selector: str, timeout: int = 5000) -> str:
+    try:
+        page = await _get_page()
+        await page.wait_for_selector(selector, timeout=int(timeout))
+        return _ok({"appeared": selector})
+    except Exception as exc:
+        return _err(exc)
+
+
+@mcp.tool(name="screenshot", description="截图到指定路径，返回文件路径")
+async def screenshot(path: str = "") -> str:
+    try:
+        page = await _get_page()
+        if not path:
+            path = f"/tmp/screenshot_{int(time.time() * 1000)}.png"
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        await page.screenshot(path=path, full_page=True)
+        return _ok({"path": path})
     except Exception as exc:
         return _err(exc)
 

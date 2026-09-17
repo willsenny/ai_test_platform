@@ -114,18 +114,27 @@ async def planner_node(state: AgentState) -> dict:
     goal = state["requirement"]
     project_id = state.get("project_id") or "demo"
 
-    # Phase G：生成前先检索历史相似用例作为 few-shot
-    from apps.rag.retriever import aretrieve_similar_cases
+    # Phase G：生成前先检索历史相似用例作为 few-shot，并检索知识库
+    from apps.rag.retriever import aretrieve_knowledge, aretrieve_similar_cases
 
     cases = await aretrieve_similar_cases(goal, top_k=3, project_id=project_id)
+    try:
+        knowledge = await aretrieve_knowledge(goal, top_k=5, project_id=project_id)
+    except Exception:  # noqa: BLE001 - 知识库不可用不阻断
+        knowledge = []
 
     plan = [
         f"1. 解析目标: {goal}",
         f"2. RAG 检索历史相似用例: [retrieved {len(cases)} similar cases]",
-        "3. 通过 MCP(stdio) 调用 fake_generate_test 生成用例（注入历史 selector few-shot）",
+        f"   RAG 检索知识库: [retrieved {len(knowledge)} knowledge snippets]",
+        "3. 调 LLM 生成 手动/UI/接口 三类用例（注入历史用例 + 知识库 few-shot）",
         "4. 将用例写入 PostgreSQL TestCase 表",
     ]
-    return {"plan": plan, "retrieved_cases": cases}
+    return {
+        "plan": plan,
+        "retrieved_cases": cases,
+        "retrieved_knowledge": knowledge,
+    }
 
 
 async def generator_node(state: AgentState) -> dict:
@@ -151,6 +160,8 @@ async def generator_node(state: AgentState) -> dict:
         project_pk=state.get("project_ref_pk"),
         api_base_url=state.get("api_base_url", ""),
         ui_target_url=state.get("ui_target_url", ""),
+        retrieved_cases=state.get("retrieved_cases", []),
+        knowledge=state.get("retrieved_knowledge", []),
     )
     return {
         "test_cases": test_cases,

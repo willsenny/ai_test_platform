@@ -148,9 +148,11 @@ async def generate_for_scenario(
     project_pk: int | None = None,
     api_base_url: str = "",
     ui_target_url: str = "",
-    manual_count: int = 0,
+    retrieved_cases: list | None = None,
+    knowledge: list | None = None,
+    page_snapshot: dict | None = None,
 ) -> list[dict]:
-    """按场景 automation 生成手动/UI/接口用例（去重后返回）。"""
+    """按场景 automation 生成手动/UI/接口用例（注入 RAG few-shot；去重后返回）。"""
     automation = resolve_automation(scenario)
     scenario_id = scenario.get("scenario_id")
     module = scenario.get("module", "")
@@ -158,7 +160,10 @@ async def generate_for_scenario(
 
     if automation["manual"]:
         cases += await _generate(
-            "manual", scenario, prompts.build_manual_prompt(scenario),
+            "manual", scenario,
+            prompts.build_manual_prompt(
+                scenario, retrieved_cases=retrieved_cases, knowledge=knowledge
+            ),
             prompts.MANUAL_SYSTEM, project_pk, scenario_id, module,
         )
     if automation["ui"]:
@@ -167,8 +172,15 @@ async def generate_for_scenario(
             or scenario.get("env", {}).get("ui")
             or default_ui_target()
         )
+        snapshot = page_snapshot or await fetch_page_snapshot(target)
         cases += await _generate(
-            "ui", scenario, prompts.build_ui_prompt(scenario, target),
+            "ui", scenario,
+            prompts.build_ui_prompt(
+                scenario, target,
+                retrieved_cases=retrieved_cases,
+                knowledge=knowledge,
+                page_snapshot=snapshot,
+            ),
             prompts.UI_SYSTEM, project_pk, scenario_id, module, ui_target=target,
         )
     if automation["api"]:
@@ -177,11 +189,34 @@ async def generate_for_scenario(
         else:
             base = api_base_url or scenario.get("env", {}).get("api", "")
             cases += await _generate(
-                "api", scenario, prompts.build_api_prompt(scenario, base),
+                "api", scenario,
+                prompts.build_api_prompt(
+                    scenario, base,
+                    retrieved_cases=retrieved_cases, knowledge=knowledge,
+                ),
                 prompts.API_SYSTEM, project_pk, scenario_id, module, api_base=base,
             )
 
     return dedup(cases)
+
+
+async def fetch_page_snapshot(url: str) -> dict | None:
+    """用 Playwright MCP 打开目标页并抓取元素清单（供页面感知生成）。"""
+    if not url:
+        return None
+    try:
+        from apps.mcp.client import MCPClient
+
+        async with MCPClient(servers=["playwright"]) as mcp:
+            await mcp.call_tool("playwright", "navigate", {"url": url})
+            raw = await mcp.call_tool("playwright", "snapshot")
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, str):
+            return json.loads(raw)
+    except Exception:  # noqa: BLE001 - 抓取失败退化为无页面上下文
+        return None
+    return None
 
 
 def resolve_url(path: str, base: str) -> str:

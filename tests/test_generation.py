@@ -172,6 +172,7 @@ class TestGenerateForScenario:
             return schema.model_validate({"cases": [{"title": "API", "path": "/x"}]}), {}, 0
 
         monkeypatch.setattr(generation, "call_structured", fake_structured)
+        monkeypatch.setattr(generation, "fetch_page_snapshot", AsyncMock(return_value=None))
 
         cases = await generation.generate_for_scenario(
             {

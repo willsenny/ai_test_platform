@@ -473,6 +473,29 @@ async def _run_steps(
                 result = await mcp.call_tool(
                     "playwright", "click", {"selector": selector}
                 )
+            elif action in ("select", "select_option"):
+                result = await mcp.call_tool(
+                    "playwright", "select", {"selector": selector, "value": value}
+                )
+            elif action == "check":
+                result = await mcp.call_tool(
+                    "playwright", "check", {"selector": selector}
+                )
+            elif action == "hover":
+                result = await mcp.call_tool(
+                    "playwright", "hover", {"selector": selector}
+                )
+            elif action == "press":
+                result = await mcp.call_tool(
+                    "playwright", "press", {"selector": selector, "key": value or "Enter"}
+                )
+            elif action in ("wait_for", "waitfor"):
+                wait_ms = min(float(value or 5000), 15000)
+                result = await mcp.call_tool(
+                    "playwright",
+                    "wait_for",
+                    {"selector": selector, "timeout": int(wait_ms)},
+                )
             elif action == "wait":
                 wait_ms = min(float(value or 500), 10000)
                 await asyncio.sleep(wait_ms / 1000)
@@ -492,9 +515,11 @@ async def _run_steps(
 
         duration_ms = int((time.perf_counter() - started) * 1000)
         step_status = "error" if error else "pass"
+        screenshot_path = await _capture_failure(mcp, error) if error else ""
         rows.append(_step_row(
             case.pk, run_id, idx, "step", action, selector, value,
             "", _short(data) if not error else "", step_status, error, duration_ms,
+            screenshot_path=screenshot_path,
         ))
         log_lines.append(
             f"[step {idx}] {action} {selector or value} "
@@ -585,7 +610,7 @@ async def _run_assertions(
 def _step_row(
     case_id: int, run_id: int, index: int, phase: str, action: str,
     selector: str, value: str, expected: str, actual: str,
-    status: str, error: str, duration_ms: int,
+    status: str, error: str, duration_ms: int, screenshot_path: str = "",
 ) -> dict:
     return {
         "run_id": run_id,
@@ -599,8 +624,20 @@ def _step_row(
         "actual": actual,
         "status": status,
         "error": error,
+        "screenshot_path": screenshot_path,
         "duration_ms": duration_ms,
     }
+
+
+async def _capture_failure(mcp, error: str) -> str:
+    """失败时截图（best-effort），返回路径。"""
+    if not error:
+        return ""
+    try:
+        data = _as_dict(await mcp.call_tool("playwright", "screenshot", {}))
+        return str(data.get("path", ""))
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 # ============================================================

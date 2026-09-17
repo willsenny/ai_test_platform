@@ -373,10 +373,12 @@ Scenario: 正常登录
 - `mock_api` 支持 /login、/health、/v3/api-docs。
 - 验证：`openapi_sample.json` → 4 个接口场景；`process_doc` 批次 #7：total=6 场景（2 Story + 4 Swagger），生成 38 用例，Swagger 用例 **4/4 通过**（含 json_schema）；`pytest` 76 passed。
 
-### Step 4（下一步，含 RAG 接入）
-- 页面感知 UI 生成（目标页 accessibility snapshot 注入 prompt）+ 弹性定位器。
-- **RAG 接入生成**：把 `planner.retrieved_cases`（历史相似用例）与 `rag.service.retrieve`（`test_knowledge` 的 PRD/接口规范）注入 manual/UI/API prompt；`RAG_EMBEDDER=bge` 切真实 embedding；`RAG_ENABLED=0` 降级。
-- `playwright_server` 动作扩展（select/check/hover/press/wait_for）+ 失败截图。
+### Step 4 ✅（完成，含 RAG 接入）
+- **RAG 接入生成**：`planner_node` 增加 `aretrieve_knowledge`（Phase G retriever，collection `test_knowledge`，本地/远端自动降级）并返回 `retrieved_knowledge`；`generator_node` 把 `retrieved_cases`（历史相似用例 few-shot）+ `retrieved_knowledge`（PRD/接口规范）注入 manual/UI/API 三类 prompt；空库/不可用返回 []，不阻断。
+- **页面感知 UI 生成**：`generation.fetch_page_snapshot` 用 Playwright MCP 打开目标页抓取元素（id/name/placeholder/label/text）注入 UI prompt；LLM 产出弹性定位器（`#phone`、`button:has-text("登录")`、`text="登录成功"`）。
+- **执行能力扩展**：`playwright_server` 新增 `select/check/hover/press/wait_for/screenshot`；`executor._run_steps` 支持 `select/check/hover/press/wait_for`，失败步骤自动截图并写入 `TestStepResult.screenshot_path`。
+- 验证：`process_doc 4` 批次 #8 → 14/15 自动化通过；UI 2/2、Swagger 4/4；`pytest` 84 passed；`manage.py check` 无错。
+- 说明：RAG 默认仍为 `FakeEmbedder`（dim=8）；`RAG_EMBEDDER=bge` + embedding 服务可切真实语义；`RAG_ENABLED=0` 降级。知识库需先入库 `test_knowledge` 才会命中。
 
 ### 未完成
-- Phase J Step 4 页面感知 UI + RAG 接入、Step 5 归档导出、Step 6 自愈增强、Step 7 审核界面。
+- Phase J Step 5 归档导出、Step 6 自愈增强（LLM 候选 + 向量定位器库 + API 自愈）、Step 7 审核界面。

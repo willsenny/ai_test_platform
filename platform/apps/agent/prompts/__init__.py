@@ -66,31 +66,101 @@ def scenario_context(scenario: dict) -> str:
     return "\n".join(lines)
 
 
-def build_manual_prompt(scenario: dict) -> str:
+def _few_shot_block(retrieved_cases: list[dict] | None) -> str:
+    if not retrieved_cases:
+        return ""
+    lines = ["历史相似用例（few-shot，可复用其步骤与 selector 风格）:"]
+    for item in retrieved_cases[:3]:
+        payload = item.get("payload", {}) if isinstance(item, dict) else {}
+        steps = payload.get("steps") or []
+        lines.append(f"- {payload.get('title', '')} {json.dumps(steps, ensure_ascii=False)}")
+    return "\n".join(lines)
+
+
+def _knowledge_block(knowledge: list[dict] | None) -> str:
+    if not knowledge:
+        return ""
+    lines = ["相关知识（PRD/接口规范/业务规则，仅作参考）:"]
+    for item in knowledge[:5]:
+        content = str(item.get("content", "")).strip().replace("\n", " ")
+        if content:
+            lines.append(f"- {content[:300]}")
+    return "\n".join(lines)
+
+
+def _page_block(page_snapshot: dict | None) -> str:
+    if not page_snapshot:
+        return ""
+    elements = page_snapshot.get("elements") or []
+    lines = [f"目标页面标题: {page_snapshot.get('title', '')}",
+             "页面可交互元素（务必使用其中真实存在的 id/placeholder/name/text 作为 selector）:"]
+    for el in elements[:40]:
+        lines.append(
+            "- " + json.dumps(
+                {
+                    "tag": el.get("tag"),
+                    "id": el.get("id"),
+                    "name": el.get("name"),
+                    "placeholder": el.get("placeholder"),
+                    "label": el.get("label"),
+                    "text": el.get("text"),
+                },
+                ensure_ascii=False,
+            )
+        )
+    return "\n".join(lines)
+
+
+def _extras(retrieved_cases, knowledge, page_snapshot=None) -> str:
+    blocks = [
+        _few_shot_block(retrieved_cases),
+        _knowledge_block(knowledge),
+        _page_block(page_snapshot),
+    ]
+    return ("\n\n" + "\n\n".join(b for b in blocks if b)) if any(blocks) else ""
+
+
+def build_manual_prompt(scenario: dict, *, retrieved_cases=None, knowledge=None) -> str:
     return (
-        f"{scenario_context(scenario)}\n\n"
+        f"{scenario_context(scenario)}"
+        f"{_extras(retrieved_cases, knowledge)}\n\n"
         "请为以上 Story 生成手动测试用例，覆盖正常/边界/异常。\n"
         '输出 JSON：{"cases":[{"title","preconditions":[],"steps":[{"action","expected"}],'
         '"expected_result","priority","tags":[]}]}'
     )
 
 
-def build_ui_prompt(scenario: dict, target_url: str = "") -> str:
+def build_ui_prompt(
+    scenario: dict,
+    target_url: str = "",
+    *,
+    retrieved_cases=None,
+    knowledge=None,
+    page_snapshot=None,
+) -> str:
     target = target_url or scenario.get("env", {}).get("ui", "")
     return (
         f"{scenario_context(scenario)}\n"
-        f"被测 UI 地址: {target}\n\n"
+        f"被测 UI 地址: {target}"
+        f"{_extras(retrieved_cases, knowledge, page_snapshot)}\n\n"
         "请把可自动化的 UI 场景转成 Playwright 步骤。\n"
         '输出 JSON：{"cases":[{"title","preconditions":[],"steps":[{"action","selector","value","description"}],'
         '"assertions":[{"type","selector","expected"}],"priority","tags":[],"target_url"}]}'
     )
 
 
-def build_api_prompt(scenario: dict, api_base_url: str = "") -> str:
+def build_api_prompt(
+    scenario: dict,
+    api_base_url: str = "",
+    *,
+    retrieved_cases=None,
+    knowledge=None,
+) -> str:
     base = api_base_url or scenario.get("env", {}).get("api", "")
     return (
         f"{scenario_context(scenario)}\n"
-        f"API 根地址: {base}\n\n"
+        f"API 根地址: {base}"
+        f"{_extras(retrieved_cases, knowledge)}\n\n"
         "请生成接口测试用例（正常/异常/边界），请求体参考测试数据。\n"
         '输出 JSON：{"cases":[{"title","method","path","headers":{},"body":{},"params":{},'
         '"assertions":[{"type","path","expected"}],"priority","tags":[]}]}'

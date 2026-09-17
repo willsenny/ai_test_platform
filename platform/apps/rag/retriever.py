@@ -26,8 +26,14 @@ logger = logging.getLogger(__name__)
 COLLECTION_TESTCASES = "testcases"
 COLLECTION_STEP_RESULTS = "step_results"
 COLLECTION_HEAL_LOGS = "heal_logs"
+COLLECTION_KNOWLEDGE = "test_knowledge"
 
-ALL_COLLECTIONS = (COLLECTION_TESTCASES, COLLECTION_STEP_RESULTS, COLLECTION_HEAL_LOGS)
+ALL_COLLECTIONS = (
+    COLLECTION_TESTCASES,
+    COLLECTION_STEP_RESULTS,
+    COLLECTION_HEAL_LOGS,
+    COLLECTION_KNOWLEDGE,
+)
 
 
 # ============================================================
@@ -316,9 +322,22 @@ def retrieve_heal_experience(pattern: str, top_k: int = 3, only_successful: bool
 # ============================================================
 # async 包装（供 async 节点使用）
 # ============================================================
+def retrieve_knowledge(query: str, top_k: int = 5, project_id: str = "") -> list[dict]:
+    """检索知识库（PRD / 接口规范 / 业务规则）。空库或不可用时返回 []。"""
+    return retrieve(query, COLLECTION_KNOWLEDGE, top_k=top_k, project_id=project_id)
+
+
 async def aretrieve_similar_cases(goal: str, top_k: int = 3, project_id: str = "") -> list[dict]:
     from asgiref.sync import sync_to_async
 
     return await sync_to_async(retrieve_similar_cases, thread_sensitive=False)(
         goal, top_k=top_k, project_id=project_id
+    )
+
+
+async def aretrieve_knowledge(query: str, top_k: int = 5, project_id: str = "") -> list[dict]:
+    from asgiref.sync import sync_to_async
+
+    return await sync_to_async(retrieve_knowledge, thread_sensitive=False)(
+        query, top_k=top_k, project_id=project_id
     )
