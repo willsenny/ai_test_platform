@@ -3,7 +3,7 @@
 """
 from pathlib import Path
 
-from apps.core.models import RequirementDoc
+from apps.core.models import RequirementDoc, Scenario
 from apps.core.parsers import get_parser
 
 
@@ -34,9 +34,10 @@ def parse_doc(doc_id: int) -> RequirementDoc:
 
     try:
         text = _read_text(doc)
-        parser = get_parser(_guess_file_type(doc))
+        parser = get_parser(_guess_file_type(doc), text)
         scenarios = parser.parse(text)
         doc.parsed_scenarios = scenarios
+        _save_scenarios(doc, scenarios)
         doc.status = RequirementDoc.Status.PARSED
         doc.error_message = ""
     except Exception as exc:  # noqa: BLE001 - 解析失败写入状态，不抛出
@@ -49,3 +50,38 @@ def parse_doc(doc_id: int) -> RequirementDoc:
         ]
     )
     return doc
+
+
+def _save_scenarios(doc: RequirementDoc, scenarios: list[dict]) -> int:
+    """用解析结果重建 Scenario 行（幂等：先删后建）。"""
+    Scenario.objects.filter(doc_id=doc.pk).delete()
+    rows = [
+        Scenario(
+            doc_id=doc.pk,
+            project_id=doc.project_id,
+            story_key=scenario.get("story_key", ""),
+            epic=scenario.get("epic", ""),
+            sprint=scenario.get("sprint", ""),
+            module=scenario.get("module", ""),
+            title=scenario.get("title", "") or "未命名场景",
+            test_types=list(scenario.get("test_types") or []),
+            priority=scenario.get("priority", "P1"),
+            story_points=scenario.get("story_points"),
+            role=scenario.get("role", ""),
+            goal=scenario.get("goal", ""),
+            benefit=scenario.get("benefit", ""),
+            business_rules=list(scenario.get("business_rules") or []),
+            test_data=dict(scenario.get("test_data") or {}),
+            acceptance=list(scenario.get("acceptance") or []),
+            definition_of_done=list(scenario.get("definition_of_done") or []),
+            automation=dict(scenario.get("automation") or {}),
+            api_ref=scenario.get("api_ref", ""),
+            env=dict(scenario.get("env") or {}),
+            tags=list(scenario.get("tags") or []),
+            raw_text=scenario.get("raw_text", ""),
+        )
+        for scenario in scenarios
+    ]
+    if rows:
+        Scenario.objects.bulk_create(rows)
+    return len(rows)

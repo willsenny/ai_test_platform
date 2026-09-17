@@ -81,6 +81,56 @@ class RequirementDoc(models.Model):
         return len(self.parsed_scenarios or [])
 
 
+class Scenario(models.Model):
+    """解析后的需求场景（Jira Story / Markdown 场景），供生成与追溯。"""
+
+    class TestType(models.TextChoices):
+        FUNCTIONAL = "functional", "功能"
+        UI = "ui", "UI"
+        API = "api", "接口"
+
+    doc = models.ForeignKey(
+        RequirementDoc, on_delete=models.CASCADE, related_name="scenarios"
+    )
+    project = models.ForeignKey(
+        Project, on_delete=models.CASCADE, related_name="scenarios"
+    )
+
+    story_key = models.CharField(max_length=64, blank=True, default="")
+    epic = models.CharField(max_length=200, blank=True, default="")
+    sprint = models.CharField(max_length=100, blank=True, default="")
+    module = models.CharField(max_length=200, blank=True, default="")
+    title = models.CharField(max_length=300)
+    test_types = models.JSONField(default=list, blank=True)
+    priority = models.CharField(max_length=2, default="P1")
+    story_points = models.PositiveSmallIntegerField(null=True, blank=True)
+
+    role = models.CharField(max_length=200, blank=True, default="")
+    goal = models.TextField(blank=True, default="")
+    benefit = models.TextField(blank=True, default="")
+    business_rules = models.JSONField(default=list, blank=True)
+    test_data = models.JSONField(default=dict, blank=True)
+    acceptance = models.JSONField(default=list, blank=True)
+    definition_of_done = models.JSONField(default=list, blank=True)
+    automation = models.JSONField(default=dict, blank=True)
+    api_ref = models.CharField(max_length=300, blank=True, default="")
+    env = models.JSONField(default=dict, blank=True)
+    tags = models.JSONField(default=list, blank=True)
+    raw_text = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["doc_id", "id"]
+        verbose_name = "需求场景"
+        verbose_name_plural = "需求场景"
+
+    def __str__(self) -> str:
+        key = f"{self.story_key} " if self.story_key else ""
+        return f"{key}{self.title}"
+
+
 class TestGenerationBatch(models.Model):
     """一次批量生成/执行/自愈批次，记录全链路进度。"""
 

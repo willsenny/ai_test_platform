@@ -226,3 +226,121 @@
   `manage.py check` → no issues；`makemigrations --check` → no changes（无需迁移）。
 
 **未做**：reranker 精排（仅 score 阈值）、批量 embed 历史数据脚本、embedding 缓存层、混合检索（BM25）。
+
+---
+
+# Phase J — 需求文档（Jira Story）→ 三类用例 → 归档导出（实施计划）
+
+> **目标**：上传 Jira Sprint Story 格式需求文档，AI 生成 **手动用例 / UI 自动化 / 接口自动化**，
+> 存档并可导出交付（Excel / pytest 工程 / JSON）。UI 先用本地 fixture，Swagger 仅公开可访问。
+> 单人本地先行；服务器 + CICD 放 M3。
+
+## 决策（已确认）
+
+| 项 | 决策 |
+|---|---|
+| 模型 | DeepSeek V4.1 Flash（low/high），接真实 `call_llm`，去掉无意义的 `NO_LLM` 兜底 |
+| 优先级 | 先做需求文档轨道；网站轨道放 M2 |
+| 网站 | 内网 + 简单登录认证（M2） |
+| API 来源 | 仅 Swagger（公开可访问，token 后续） |
+| 产出 | 手动用例 + 自动化用例，DB 存档 + 导出交付 |
+| 存储 | 单 `TestCase` + `kind`(manual/automated) + `test_type`(functional/ui/api) |
+| 导出 | 手动 Excel(.xlsx)；自动化 pytest 工程 zip + JSON（无额外格式） |
+| 手动用例 | 也由 AI 生成；输入模板参考 Jira Sprint Story |
+| M1 UI 目标 | 本地 `mcp_servers/fixtures/login.html`；真实站点 M2 |
+| 部署 | 单人本地 → M3 服务器 + CICD |
+
+## 需求输入模板（Jira Story + Gherkin）
+
+新增 `templates/requirements/story_template.md`，关键结构：
+
+```markdown
+# Epic: <Epic 名>
+> UI: <base_url>
+> API: <api_base_url>
+> Swagger: <swagger_url>
+
+## Sprint: <sprint>
+### Story: <KEY-101> <标题>
+- 类型: 功能, UI, 接口
+- 优先级: P0
+- Story Points: 5
+- 组件: 登录
+- 标签: login, smoke
+- 自动化: manual=是, ui=是, api=是
+- 关联接口: POST /api/login
+
+**As a** <角色>
+**I want** <目标>
+**So that** <价值>
+
+**业务规则**
+- ...
+
+**测试数据**
+- 手机号: 13800138000
+
+**Acceptance Criteria**
+```gherkin
+Scenario: 正常登录
+  Given 用户在登录页
+  When 输入手机号 "13800138000" 和验证码 "123456"
+  And 点击登录按钮
+  Then 页面提示 "登录成功"
+```
+
+**Definition of Done**
+- [ ] 接口返回 200
+```
+
+映射：Gherkin `Given/When/Then` → 手动用例步骤/预期 + UI 自动化 steps/assertions；
+`关联接口` + Swagger → API 自动化；`自动化` 行控制产出形态。
+
+## M1 链路
+
+```
+上传 Story 模板文档
+ → story_parser 解析（Story/Gherkin/元数据）→ Scenario 落库
+ → LLM 生成：① 手动用例 ② UI 自动化 ③ API 自动化（读 Swagger）
+ → 本地 fixture 执行 UI + Mock API 执行 API
+ → 失败自愈（规则 → LLM 候选）
+ → 存档：DB + Excel(手动) + pytest 工程(自动化) + JSON
+```
+
+## Step 1–7
+
+| Step | 内容 | 关键触点 |
+|---|---|---|
+| **1 模板与解析** | Story 模板 + `story_parser.py`（Gherkin/元数据）+ `Scenario` 模型 | `templates/requirements/`、`core/parsers/`、`core/models.py`、`core/services/doc_service.py` |
+| **2 真实 LLM 生成** | `call_llm` 接入 graph；pydantic schema + prompts；去重；`LLMCall` 成本入库；`llm_smoke` | `agent/llm.py`、`agent/graph.py`、`agent/schemas.py`、`agent/prompts/` |
+| **3 Swagger 接口用例** | 公开 spec 拉取 → endpoint → 正/负/边界 API 场景；JSON Schema 断言 | `core/parsers/openapi_parser.py`、`api_server.py` |
+| **4 UI 生成 + 本地执行** | Gherkin→UI steps；弹性定位器；playwright 动作扩展 + 失败截图 | `agent/prompts/ui_cases.md`、`mcp_servers/playwright_server.py`、`executor/executor.py` |
+| **5 归档 + 导出** | `kind/test_type/scenario FK/manual_steps`；`ExportJob`；`export_cases` 命令；Web 导出按钮 | `core/models.py`、`core/services/export_service.py`、`core/management/commands/export_cases.py` |
+| **6 自愈（UI+API）** | 规则 + LLM 候选 + 向量定位器库；API 期望值/token 自愈 | `selfheal/`、`rag/` |
+| **7 Web 最小审核** | Scenario 审核、用例分栏、运行、导出 | `core/views.py`、`templates/core/` |
+
+**清理项**：`graph.py` 移除 echo 兜底路径；`echo_server.py` 与 `tests/test_rag_phase_g.py::TestEchoFewShot` 移除（few-shot 改由真实示例注入）。
+
+## 数据模型
+
+| 模型 | 变更 |
+|---|---|
+| `Scenario`（新） | doc/project FK、story_key、epic、sprint、module、title、test_types、priority、story_points、role/goal/benefit、business_rules、test_data、acceptance(Gherkin)、automation、api_ref、tags、raw_text |
+| `TestCase` | + kind、test_type、module、scenario FK、manual_steps、expected_result |
+| `TestGenerationBatch` | + manual_count、automated_count |
+| `ExportJob`（新） | batch/project、format、status、file、created_at |
+| `LLMCall`（新） | task/model/tokens/cost/latency |
+
+新增依赖：`openpyxl`（导出）、`jsonschema`（API 断言）。
+
+## 验证基线
+
+- `cd platform && python -m pytest ../tests/ -q` 不回归（新增 parser/schema/export 单测）。
+- `python manage.py check` 无错、`makemigrations --check` 无变更。
+- `process_doc <id>`：Story → 手动 + UI + API 用例 → 执行 → 自愈 → 三种导出。
+
+## M2 / M3
+
+- **M2 内网站点**：`site_explorer_server`（爬取 + 页面模型）+ 简单登录认证（`storage_state`），真实站点替换本地 fixture。约 10–14 人日。
+- **M3 服务器 + CICD**：Celery/Redis、SSE 进度、定时回归、GitHub Actions/JUnit 导出、通知、多人权限。约 15–20 人日。
+- **延后**：Swagger 鉴权 token、Postman、PDF/DOCX/Confluence、reranker、截图录像、多租户。

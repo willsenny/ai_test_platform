@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Project, RequirementDoc, TestGenerationBatch
+from .models import Project, RequirementDoc, Scenario, TestGenerationBatch
 
 
 @admin.register(Project)
@@ -15,6 +15,17 @@ class RequirementDocAdmin(admin.ModelAdmin):
     list_filter = ("status", "file_type", "project")
     search_fields = ("title",)
     readonly_fields = ("parsed_scenarios", "error_message")
+
+
+@admin.register(Scenario)
+class ScenarioAdmin(admin.ModelAdmin):
+    list_display = (
+        "id", "story_key", "title", "project", "module",
+        "priority", "sprint", "created_at",
+    )
+    list_filter = ("priority", "project", "sprint", "module")
+    search_fields = ("story_key", "title", "module")
+    readonly_fields = ("acceptance", "test_data", "business_rules", "raw_text")
 
 
 @admin.register(TestGenerationBatch)
