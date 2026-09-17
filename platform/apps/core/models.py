@@ -155,6 +155,8 @@ class TestGenerationBatch(models.Model):
     )
     total = models.PositiveIntegerField(default=0)
     generated = models.PositiveIntegerField(default=0)
+    manual_count = models.PositiveIntegerField(default=0)
+    automated_count = models.PositiveIntegerField(default=0)
     executed = models.PositiveIntegerField(default=0)
     healed = models.PositiveIntegerField(default=0)
 
@@ -187,6 +189,48 @@ class TestGenerationBatch(models.Model):
             return 100
         done = min(self.generated, self.total)
         return int(done / self.total * 100)
+
+
+class ExportJob(models.Model):
+    """用例/报告导出任务（Phase J Step 5）。"""
+
+    class Format(models.TextChoices):
+        XLSX = "xlsx", "手动用例 Excel"
+        PYTEST = "pytest", "自动化 pytest 工程"
+        JSON = "json", "JSON 全量存档"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "待处理"
+        DONE = "done", "已完成"
+        FAILED = "failed", "失败"
+
+    project = models.ForeignKey(
+        Project,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="export_jobs",
+    )
+    batch = models.ForeignKey(
+        TestGenerationBatch,
+        on_delete=models.CASCADE,
+        related_name="exports",
+    )
+    format = models.CharField(max_length=20, choices=Format.choices)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING
+    )
+    file = models.CharField(max_length=500, blank=True, default="")
+    error = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "导出任务"
+        verbose_name_plural = "导出任务"
+
+    def __str__(self) -> str:
+        return f"Export #{self.pk} [{self.format}] {self.status}"
 
 
 class LLMCall(models.Model):

@@ -42,6 +42,8 @@ dependencies = [
 
     # 工具
     "python-jsonpath>=0.11",   # JSONPath 断言
+    "jsonschema>=4.0",         # JSON Schema 断言
+    "openpyxl>=3.1",           # 手动用例 Excel 导出
     "structlog>=24.1",         # 结构化日志
     "tenacity>=9.0",           # 重试机制
 ]

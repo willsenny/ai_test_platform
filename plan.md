@@ -380,5 +380,17 @@ Scenario: 正常登录
 - 验证：`process_doc 4` 批次 #8 → 14/15 自动化通过；UI 2/2、Swagger 4/4；`pytest` 84 passed；`manage.py check` 无错。
 - 说明：RAG 默认仍为 `FakeEmbedder`（dim=8）；`RAG_EMBEDDER=bge` + embedding 服务可切真实语义；`RAG_ENABLED=0` 降级。知识库需先入库 `test_knowledge` 才会命中。
 
+### Step 5 ✅（完成）
+- `TestGenerationBatch` 新增 `manual_count` / `automated_count`（迁移 `core.0006`）；生成后回写。
+- 新增 `ExportJob` 模型（迁移 `core.0006`）+ admin。
+- `apps/core/services/export_service.py`：
+  - `xlsx` 手动用例 Excel（openpyxl；用例ID/模块/标题/类型/优先级/前置条件/步骤/预期/标签）。
+  - `pytest` 自动化工程 zip（`conftest.py` + `test_ui_generated.py`(Playwright) + `test_api_generated.py`(httpx+jsonschema) + requirements/README/manifest）。
+  - `json` 全量存档（批次 + 用例）。
+- `manage.py export_cases <batch_id> [--format xlsx|pytest|json|all]`。
+- Web：批次页新增导出按钮；`/batches/<id>/export/<fmt>/` 直接下载。
+- 依赖：`openpyxl`、`jsonschema` 写入 pyproject。
+- 验证：`export_cases 8` 三种格式产物生成；导出 pytest 工程 `py_compile` 通过；Web 导出端点 200/404 正常；`pytest` 91 passed。
+
 ### 未完成
-- Phase J Step 5 归档导出、Step 6 自愈增强（LLM 候选 + 向量定位器库 + API 自愈）、Step 7 审核界面。
+- Phase J Step 6 自愈增强（LLM 候选 + 向量定位器库 + API 自愈）、Step 7 审核界面。

@@ -9,6 +9,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     BatchDetailView,
+    BatchExportView,
     DocUploadView,
     ProjectListView,
     ProjectViewSet,
@@ -25,4 +26,9 @@ web_urlpatterns = [
     path("docs/upload/", DocUploadView.as_view(), name="web-doc-upload"),
     path("batches/<int:pk>/", BatchDetailView.as_view(), name="web-batch-detail"),
     path("batches/<int:pk>/report/", ReportView.as_view(), name="web-batch-report"),
+    path(
+        "batches/<int:pk>/export/<str:fmt>/",
+        BatchExportView.as_view(),
+        name="web-batch-export",
+    ),
 ]

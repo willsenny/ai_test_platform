@@ -120,6 +120,34 @@ class BatchDetailView(DetailView):
         return context
 
 
+_EXPORT_CONTENT_TYPE = {
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "pytest": "application/zip",
+    "json": "application/json",
+}
+
+
+class BatchExportView(View):
+    """导出批次：手动用例 xlsx / 自动化 pytest 工程 / JSON 存档。"""
+
+    def get(self, request, pk, fmt):
+        if fmt not in _EXPORT_CONTENT_TYPE:
+            return HttpResponseNotFound("不支持的导出格式")
+        batch = get_object_or_404(TestGenerationBatch, pk=pk)
+        from .services.export_service import export_batch
+
+        job = export_batch(batch.pk, fmt)
+        if job.status != "done" or not job.file:
+            return HttpResponseNotFound(f"导出失败: {job.error}")
+
+        path = Path(job.file)
+        response = HttpResponse(
+            path.read_bytes(), content_type=_EXPORT_CONTENT_TYPE[fmt]
+        )
+        response["Content-Disposition"] = f'attachment; filename="{path.name}"'
+        return response
+
+
 class ReportView(View):
     """直接返回 TestRun 生成的 HTML 报告。"""
 

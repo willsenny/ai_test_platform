@@ -16,8 +16,16 @@
 <div class="row text-center mb-4">
   <div class="col"><div class="card card-body"><div class="h4">{{ batch.total }}</div><small>场景</small></div></div>
   <div class="col"><div class="card card-body"><div class="h4">{{ batch.generated }}</div><small>生成用例</small></div></div>
+  <div class="col"><div class="card card-body"><div class="h4">{{ batch.manual_count }}</div><small>手动</small></div></div>
+  <div class="col"><div class="card card-body"><div class="h4">{{ batch.automated_count }}</div><small>自动化</small></div></div>
   <div class="col"><div class="card card-body"><div class="h4">{{ batch.executed }}</div><small>执行</small></div></div>
   <div class="col"><div class="card card-body"><div class="h4 text-success">{{ batch.healed }}</div><small>自愈</small></div></div>
+</div>
+
+<div class="mb-3">
+  <a class="btn btn-sm btn-outline-primary" href="{% url 'web-batch-export' batch.pk 'xlsx' %}">导出手动用例 Excel</a>
+  <a class="btn btn-sm btn-outline-primary" href="{% url 'web-batch-export' batch.pk 'pytest' %}">导出自动化 pytest 工程</a>
+  <a class="btn btn-sm btn-outline-primary" href="{% url 'web-batch-export' batch.pk 'json' %}">导出 JSON 存档</a>
 </div>
 
 {% if batch.error_message %}

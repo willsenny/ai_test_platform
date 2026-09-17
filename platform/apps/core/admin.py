@@ -1,6 +1,7 @@
 from django.contrib import admin
 
 from .models import (
+    ExportJob,
     LLMCall,
     Project,
     RequirementDoc,
@@ -38,10 +39,18 @@ class ScenarioAdmin(admin.ModelAdmin):
 class TestGenerationBatchAdmin(admin.ModelAdmin):
     list_display = (
         "id", "project", "doc", "status",
-        "total", "generated", "executed", "healed", "created_at",
+        "total", "generated", "manual_count", "automated_count",
+        "executed", "healed", "created_at",
     )
     list_filter = ("status", "project")
     readonly_fields = ("case_ids", "run", "error_message")
+
+
+@admin.register(ExportJob)
+class ExportJobAdmin(admin.ModelAdmin):
+    list_display = ("id", "batch", "format", "status", "file", "created_at")
+    list_filter = ("format", "status")
+    readonly_fields = ("file", "error")
 
 
 @admin.register(LLMCall)

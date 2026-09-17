@@ -95,6 +95,16 @@ def _automated_case_ids(case_ids: list[int]) -> list[int]:
     )
 
 
+def _kind_counts(case_ids: list[int]) -> tuple[int, int]:
+    """返回 (manual, automated) 用例数。"""
+    from apps.testcases.models import TestCase
+
+    manual = TestCase.objects.filter(
+        id__in=case_ids, kind=TestCase.Kind.MANUAL
+    ).count()
+    return manual, len(case_ids) - manual
+
+
 def _load_project(project_id) -> Project | None:
     if not project_id:
         return None
@@ -180,9 +190,12 @@ async def generate_from_doc(
         except Exception as exc:  # noqa: BLE001 - 单场景失败不阻断整批
             errors.append(f"{scenario.get('title', '?')}: {type(exc).__name__}: {exc}")
 
+    manual_count, automated_count = await sync_to_async(_kind_counts)(case_ids)
     await sync_to_async(_update_batch)(
         batch.pk,
         generated=len(case_ids),
+        manual_count=manual_count,
+        automated_count=automated_count,
         case_ids=case_ids,
         status=TestGenerationBatch.Status.EXECUTING,
     )
