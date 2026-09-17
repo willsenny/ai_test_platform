@@ -374,6 +374,7 @@ def _run_api_assertions(
     for idx, assertion in enumerate(assertions, 1):
         a_type = assertion.get("type", "status_equals")
         expected = assertion.get("expected")
+        a_path = assertion.get("path", "")
         row_index = step_offset + idx
         passed = False
         actual = ""
@@ -394,6 +395,8 @@ def _run_api_assertions(
             path = assertion.get("path", "")
             actual = _json_path_get(first.get("body"), path)
             passed = actual is not None
+            if not passed:
+                actual = _short(first.get("body"))
         elif a_type == "json_schema":
             schema = assertion.get("schema") or {}
             actual = _short(first.get("body"))
@@ -416,8 +419,10 @@ def _run_api_assertions(
         step_status = "pass" if passed else "fail"
         if not passed and outcome != "error":
             outcome = "fail"
+        if not passed and not str(actual):
+            actual = _short(first.get("body"))
         rows.append(_step_row(
-            case.pk, run_id, row_index, "assert", a_type, "", "",
+            case.pk, run_id, row_index, "assert", a_type, a_path, "",
             str(expected), str(actual), step_status, error, 0,
         ))
         log_lines.append(

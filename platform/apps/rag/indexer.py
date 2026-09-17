@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from apps.rag.retriever import (
     COLLECTION_HEAL_LOGS,
+    COLLECTION_LOCATORS,
     COLLECTION_STEP_RESULTS,
     COLLECTION_TESTCASES,
     upsert,
@@ -188,6 +189,37 @@ def index_heal_log(log) -> bool:
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("index_heal_log(%s) skipped: %s", getattr(log, "pk", "?"), exc)
+        return False
+
+
+def index_locator(selector: str, url: str, healed_selector: str, *, detail: str = "") -> bool:
+    """记录一次成功的定位器修复（向量定位器库）。"""
+    try:
+        import hashlib
+
+        from apps.rag.embedder import get_embedder
+
+        text = " ".join(x for x in (selector, url, detail) if x).strip()
+        if not text or not healed_selector:
+            return False
+        embedder = get_embedder()
+        point_id = int(
+            hashlib.md5(f"{selector}|{url}|{healed_selector}".encode()).hexdigest()[:15], 16
+        )
+        payload = {
+            "selector": selector,
+            "url": url,
+            "healed": healed_selector,
+            "detail": detail,
+            "text": text,
+        }
+        return upsert(
+            COLLECTION_LOCATORS,
+            [{"id": point_id, "vector": embedder.embed(text), "payload": payload}],
+            embedder.dimension,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("index_locator skipped: %s", exc)
         return False
 
 

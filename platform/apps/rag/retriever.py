@@ -27,12 +27,14 @@ COLLECTION_TESTCASES = "testcases"
 COLLECTION_STEP_RESULTS = "step_results"
 COLLECTION_HEAL_LOGS = "heal_logs"
 COLLECTION_KNOWLEDGE = "test_knowledge"
+COLLECTION_LOCATORS = "locator_history"
 
 ALL_COLLECTIONS = (
     COLLECTION_TESTCASES,
     COLLECTION_STEP_RESULTS,
     COLLECTION_HEAL_LOGS,
     COLLECTION_KNOWLEDGE,
+    COLLECTION_LOCATORS,
 )
 
 
@@ -325,6 +327,14 @@ def retrieve_heal_experience(pattern: str, top_k: int = 3, only_successful: bool
 def retrieve_knowledge(query: str, top_k: int = 5, project_id: str = "") -> list[dict]:
     """检索知识库（PRD / 接口规范 / 业务规则）。空库或不可用时返回 []。"""
     return retrieve(query, COLLECTION_KNOWLEDGE, top_k=top_k, project_id=project_id)
+
+
+def retrieve_locator(selector: str, error: str = "", url: str = "", top_k: int = 3) -> list[dict]:
+    """检索历史成功的定位器修复（向量定位器库）。"""
+    query = " ".join(x for x in (selector, error, url) if x).strip()
+    if not query:
+        return []
+    return retrieve(query, COLLECTION_LOCATORS, top_k=top_k)
 
 
 async def aretrieve_similar_cases(goal: str, top_k: int = 3, project_id: str = "") -> list[dict]:

@@ -392,5 +392,15 @@ Scenario: 正常登录
 - 依赖：`openpyxl`、`jsonschema` 写入 pyproject。
 - 验证：`export_cases 8` 三种格式产物生成；导出 pytest 工程 `py_compile` 通过；Web 导出端点 200/404 正常；`pytest` 91 passed。
 
+### Step 6 ✅（完成）
+- **向量定位器库**：`rag.retriever` 新增 `COLLECTION_LOCATORS` + `retrieve_locator`；`rag.indexer.index_locator` 记录成功的 selector 修复；fixer 在规则模糊匹配失败后先查向量库。
+- **LLM selector 候选**：`fixer._llm_selector_fix` 抓取目标页元素候选，经 `self_heal_repair`（high）→ `refine_locator`（low 兜底）提出新 selector，并**校验候选必须存在于页面元素**后应用、回写向量库。
+- **API 断言自愈**：按 `TestCase.test_type == api` 走独立分支 `_fix_api_assertion`：
+  - `json_field/json_contains` 值漂移 → 刷新 expected（`assertion_refresh`）；
+  - `json_path_exists` 字段重命名 → 模糊匹配 body 键名修正 path（`field_rename`）。
+  - executor 失败断言写入 `path`（selector）与响应体，供自愈定位。
+- **指标**：`manage.py heal_stats` 打印 (失败模式→策略) 成功率。
+- 验证：脚本 → UI `#code_old`→`#code`（selector_remap，healed）、API `json_field` expected `1`→`0`（assertion_refresh，rerun pass）；`locator_history` 写入并检索命中（score 0.77）；`SelfHealLog` 增长；`pytest` 103 passed。
+
 ### 未完成
-- Phase J Step 6 自愈增强（LLM 候选 + 向量定位器库 + API 自愈）、Step 7 审核界面。
+- Phase J Step 7 审核界面（Scenario 审核/编辑、用例分栏、触发运行）。

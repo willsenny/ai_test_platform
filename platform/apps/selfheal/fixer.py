@@ -56,6 +56,13 @@ async def apply_fix(case_id: int, feature) -> FixResult:
 
     case = await sync_to_async(TestCase.objects.get)(pk=case_id)
 
+    # API 用例走独立的断言自愈分支
+    if getattr(case, "test_type", "ui") == "api":
+        result = await _fix_api_assertion(case, feature)
+        if result.success:
+            await sync_to_async(case.save)(update_fields=["assertions"])
+        return result
+
     rag_hint, mapped_type = _heal_experience(feature.failure_type)
     effective = feature.failure_type
     if effective not in ("element_not_found", "text_mismatch", "timeout", "navigation_failed") and mapped_type:
@@ -63,6 +70,10 @@ async def apply_fix(case_id: int, feature) -> FixResult:
 
     if effective == "element_not_found":
         result = await _fix_selector(case, feature)
+        if not result.success:
+            result = (await _vector_locator_fix(case, feature)) or result
+        if not result.success:
+            result = (await _llm_selector_fix(case, feature)) or result
     elif effective == "text_mismatch":
         result = await _fix_assertion(case, feature)
     elif effective == "timeout":
@@ -112,6 +123,8 @@ async def _fix_selector(case, feature) -> FixResult:
         )
 
     changed = _replace_selector(case, feature.selector, new_selector)
+    if changed:
+        _record_locator(feature.selector, new_selector, case.target_url, "rule")
     return FixResult(
         bool(changed),
         "selector_remap",
@@ -166,6 +179,177 @@ async def _fix_timing(case, feature) -> FixResult:
         "3500",
         f"inserted wait before {feature.action} {feature.selector}",
     )
+
+
+# ============================================================
+# 向量定位器库 + LLM 候选（Phase J Step 6）
+# ============================================================
+def _record_locator(old: str, new: str, url: str, strategy: str) -> None:
+    try:
+        from apps.rag.indexer import index_locator
+
+        index_locator(old, url or "", new, detail=strategy)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _vector_locator_fix(case, feature) -> FixResult | None:
+    """从历史成功的定位器修复中检索候选。"""
+    try:
+        from apps.rag.retriever import retrieve_locator
+
+        hits = retrieve_locator(
+            feature.selector, feature.error or "", case.target_url or "", top_k=3
+        )
+    except Exception:  # noqa: BLE001
+        return None
+
+    for hit in hits:
+        payload = hit.get("payload", {}) if isinstance(hit, dict) else {}
+        candidate = payload.get("healed")
+        if not candidate or candidate == feature.selector:
+            continue
+        if _replace_selector(case, feature.selector, candidate):
+            return FixResult(
+                True, "vector", feature.selector, candidate,
+                f"vector locator hit score={hit.get('score')}",
+            )
+    return None
+
+
+def _candidate_selectors(elements: list[dict]) -> list[str]:
+    out = []
+    for el in elements:
+        selector = _selector_for(el)
+        if selector and selector not in out:
+            out.append(selector)
+    return out
+
+
+def _extract_selector(content: str, candidates: list[str]) -> str:
+    text = (content or "").strip()
+    for candidate in candidates:
+        if candidate and candidate in text:
+            return candidate
+    for candidate in candidates:
+        token = candidate.strip("#[]\"'")
+        if token and token in text:
+            return candidate
+    return ""
+
+
+async def _llm_selector_fix(case, feature) -> FixResult | None:
+    """LLM（reasoning high）根据页面元素候选提出新 selector 并校验。"""
+    from apps.mcp.client import MCPClient
+
+    try:
+        async with MCPClient(servers=["playwright"]) as mcp:
+            if case.target_url:
+                await mcp.call_tool("playwright", "navigate", {"url": case.target_url})
+            snap = _as_dict(await mcp.call_tool("playwright", "snapshot"))
+    except Exception:  # noqa: BLE001
+        return None
+
+    candidates = _candidate_selectors(snap.get("elements", []))
+    if not candidates:
+        return None
+
+    prompt = (
+        f"UI 元素定位失败。失败 selector: {feature.selector}\n"
+        f"错误: {feature.error}\n"
+        f"可用 selector 候选（必须从中选择一个，原样输出）:\n"
+        + "\n".join(candidates[:40])
+        + "\n只输出一个 selector 字符串，不要解释。"
+    )
+    from apps.agent.llm import call_llm
+    from apps.agent.router import route
+
+    content = ""
+    for task in ("self_heal_repair", "refine_locator"):
+        try:
+            result = await call_llm(route(task), prompt, system="你是 UI 定位修复专家。")
+            content = result.get("content") or ""
+        except Exception:  # noqa: BLE001
+            content = ""
+        if content.strip():
+            break
+
+    proposed = _extract_selector(content, candidates)
+    if not proposed or proposed == feature.selector:
+        return None
+    if not _replace_selector(case, feature.selector, proposed):
+        return None
+    _record_locator(feature.selector, proposed, case.target_url, "llm")
+    return FixResult(
+        True, "llm", feature.selector, proposed,
+        "LLM candidate validated against page elements", rag_hint="",
+    )
+
+
+# ============================================================
+# API 断言自愈
+# ============================================================
+async def _fix_api_assertion(case, feature) -> FixResult:
+    assertions = list(case.assertions or [])
+    changed = False
+    old_value = new_value = ""
+    strategy = "assertion_refresh"
+
+    for assertion in assertions:
+        if str(assertion.get("type")) != str(feature.action):
+            continue
+        path = assertion.get("path") or ""
+        if feature.selector and path != feature.selector:
+            continue
+        if feature.expected and str(assertion.get("expected")) != str(feature.expected):
+            continue
+
+        a_type = assertion.get("type")
+        if a_type in ("json_field", "json_equals", "json_contains"):
+            candidate = feature.actual
+            if candidate and str(candidate) != str(assertion.get("expected")):
+                old_value = str(assertion.get("expected"))
+                assertion["expected"] = candidate
+                new_value = str(candidate)
+                changed = True
+        elif a_type == "json_path_exists":
+            body = _try_json(feature.actual)
+            renamed = _find_similar_key(body, path)
+            if renamed and renamed != path:
+                old_value = path
+                assertion["path"] = renamed
+                new_value = renamed
+                strategy = "field_rename"
+                changed = True
+
+    if changed:
+        case.assertions = assertions
+
+    detail = f"{strategy}: {old_value!r} -> {new_value!r}" if changed else "no api assertion matched"
+    return FixResult(changed, strategy, old_value, new_value, detail)
+
+
+def _try_json(text):
+    import json as _json
+
+    if not text:
+        return None
+    try:
+        return _json.loads(text)
+    except (ValueError, TypeError):
+        return None
+
+
+def _find_similar_key(body, path: str) -> str | None:
+    if not isinstance(body, dict) or not path:
+        return None
+    tokens = _tokens(str(path).split(".")[-1])
+    best, best_score = None, 0.0
+    for key in body:
+        score = float(len(tokens & _tokens(str(key))))
+        if score > best_score:
+            best, best_score = key, score
+    return best if best_score >= 1 else None
 
 
 # ============================================================
